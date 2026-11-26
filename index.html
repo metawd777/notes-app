@@ -1,0 +1,2157 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Дневник">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F2F1EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161713" media="(prefers-color-scheme: dark)">
+<!-- iOS берёт для домашнего экрана только картинку: SVG он игнорирует
+     и ставит скриншот страницы. Поэтому здесь настоящий PNG. -->
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Дневник состояния</title>
+<style>
+/* ──────────────────────────────────────────────────────────────
+   ШАГ 2 — экран «Сегодня» с хранилищем.
+   База IndexedDB «mh-v1», хранилища «days» и «meta».
+   ИМЯ БАЗЫ НЕ МЕНЯЕТСЯ НИКОГДА: переименование прячет данные владельца.
+   Токены правятся здесь и больше нигде. Сетка 4px: 8/12/16/24/32.
+   ────────────────────────────────────────────────────────────── */
+:root{
+  --s1:8px; --s2:12px; --s3:16px; --s4:24px; --s5:32px;
+  --r-s:10px; --r-m:14px; --r-l:20px;
+  --fs-xl:30px; --fs-l:20px; --fs-m:16px; --fs-s:13px;
+  --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  --display:ui-serif,"New York","Iowan Old Style",Georgia,"Times New Roman",serif;
+
+  /* светлая: тёплая бумага, как в БАЗЕ — холодный белый тревожит */
+  --bg:#F2F1EC;
+  --surface:#FBFAF7;
+  --track:#ECEAE3;
+  --text:#1F2220;
+  --dim:#5C615B;
+  --line:#E2E0D8;        /* разделители — декоративные */
+  --border:#868B84;      /* граница контрола — обязана давать 3:1 */
+  --accent:#3E6A5C;      /* выбранное значение */
+  --on-accent:#FFFFFF;
+  --sleep:#4A6377;
+  --side:#95553A;
+  /* тяжесть дня в календаре: один тон, четыре ступени */
+  --lvl1:#E3EBE7; --lvl2:#C2D6CE; --lvl3:#9CBBB0; --lvl4:#7FA698; --on-lvl:#1F2220;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#161713;
+    --surface:#1E1F1B;
+    --track:#24261F;
+    --text:#E8E9E2;
+    --dim:#A4A89D;
+    --line:#2C2E27;
+    --border:#777C72;
+    --accent:#92BFAE;
+    --on-accent:#161713;
+    --sleep:#9FB6C7;
+    --side:#D9A183;
+    --lvl1:#232B27; --lvl2:#2A3C35; --lvl3:#335043; --lvl4:#3E6A5C; --on-lvl:#E8E9E2;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#161713;
+  --surface:#1E1F1B;
+  --track:#24261F;
+  --text:#E8E9E2;
+  --dim:#A4A89D;
+  --line:#2C2E27;
+  --border:#777C72;
+  --accent:#92BFAE;
+  --on-accent:#161713;
+  --sleep:#9FB6C7;
+  --side:#D9A183;
+  --lvl1:#232B27; --lvl2:#2A3C35; --lvl3:#335043; --lvl4:#3E6A5C; --on-lvl:#E8E9E2;
+}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{height:100%;-webkit-text-size-adjust:100%}
+body{
+  margin:0;height:100vh;height:100dvh;
+  background:var(--bg);color:var(--text);
+  font:400 var(--fs-m)/1.45 var(--ui);
+  display:flex;flex-direction:column;
+  overflow:hidden;overscroll-behavior:none;
+  touch-action:manipulation;
+  font-variant-numeric:tabular-nums;
+}
+button,input,textarea{font:inherit;color:inherit;background:none;border:0;padding:0}
+button{cursor:pointer}
+button:disabled,input:disabled{opacity:.45}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-s)}
+
+.top{
+  padding:var(--s3) var(--s3) 4px;
+  padding-top:calc(var(--s1) + env(safe-area-inset-top));
+  display:flex;align-items:flex-start;gap:var(--s2);
+}
+.top h1{
+  margin:0;font-family:var(--display);font-size:var(--fs-xl);
+  font-weight:400;letter-spacing:.01em;line-height:1.1;
+}
+.ctx{margin:3px 0 0;font-size:var(--fs-s);color:var(--dim)}
+.gear{margin-left:auto;width:44px;height:44px;display:grid;place-items:center;color:var(--dim)}
+
+.yday{
+  margin:0 var(--s3) 6px;min-height:24px;
+  font-size:var(--fs-s);color:var(--dim);
+  display:flex;align-items:center;gap:var(--s1);
+}
+.yday b{color:var(--accent);font-weight:600;margin-left:auto}
+.yday[hidden]{display:none}
+
+main{flex:1;overflow-y:auto;padding:0 var(--s3);-webkit-overflow-scrolling:touch}
+
+.row{display:flex;align-items:center;gap:var(--s2);min-height:52px}
+.row + .row{border-top:1px solid var(--line)}
+.lbl{width:92px;flex:none}
+.lbl .n{display:block;font-size:var(--fs-m);font-weight:600;line-height:1.15;letter-spacing:-.01em}
+.lbl .v{display:block;font-size:var(--fs-s);color:var(--dim);line-height:1.25;min-height:14px}
+
+.seg{
+  display:flex;flex:1;gap:2px;padding:3px;
+  background:var(--track);border:1px solid var(--border);border-radius:var(--r-m);
+}
+.seg button{
+  flex:1;min-height:44px;border-radius:var(--r-s);
+  color:var(--dim);font-size:var(--fs-m);
+  transition:background .14s ease,color .14s ease;
+}
+.seg button[aria-checked="true"]{background:var(--accent);color:var(--on-accent);font-weight:600}
+@media (prefers-reduced-motion: reduce){.seg button{transition:none}}
+
+.block{padding:4px 0;border-top:1px solid var(--line)}
+.cap{display:flex;align-items:baseline;gap:var(--s1);margin-bottom:4px}
+.cap .n{font-size:var(--fs-m);font-weight:600}
+.cap .v{font-size:var(--fs-s);color:var(--dim)}
+
+.sleep-row{display:flex;align-items:center;gap:var(--s1)}
+.sleep-row .daylbl{font-size:var(--fs-m);color:var(--dim)}
+.pill{
+  min-height:46px;padding:0 var(--s2);
+  border:1px solid var(--border);border-radius:var(--r-m);
+  background:var(--surface);color:var(--sleep);font-weight:600;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+input[type=time].pill{width:104px;font-family:var(--ui)}
+.step{display:flex;align-items:center;gap:6px;margin-left:auto}
+.step button{
+  width:46px;height:46px;border:1px solid var(--border);border-radius:var(--r-m);
+  background:var(--surface);font-size:var(--fs-l);line-height:1;
+}
+.step .val{min-width:58px;text-align:center;color:var(--sleep);font-weight:600}
+
+.seg-wide{
+  display:flex;gap:2px;padding:3px;
+  background:var(--track);border:1px solid var(--border);border-radius:var(--r-m);
+}
+.seg-wide button{flex:1;min-height:44px;border-radius:var(--r-s);color:var(--text)}
+.seg-wide button[aria-checked="true"]{background:var(--accent);color:var(--on-accent);font-weight:600}
+
+.chips{display:flex;gap:var(--s1);overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+.chips.wrap{flex-wrap:wrap;overflow:visible}
+.chip[aria-pressed="false"]{border-style:dashed;color:var(--dim)}
+.chip.del{color:var(--side);border-color:var(--side);padding:0 var(--s2)}
+.yday .backfill-mark{margin-left:auto}
+.chips::-webkit-scrollbar{display:none}
+.chip{
+  flex:none;min-height:44px;padding:0 var(--s2);
+  border:1px solid var(--border);border-radius:22px;background:var(--surface);
+  font-size:var(--fs-s);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+}
+.chip[data-sev="1"],.chip[data-sev="2"],.chip[data-sev="3"]{
+  border-color:var(--side);color:var(--side);font-weight:600;
+}
+
+.note{
+  width:100%;min-height:46px;margin-top:6px;padding:0 var(--s2);
+  border:1px dashed var(--border);border-radius:var(--r-m);
+  color:var(--dim);text-align:left;display:flex;align-items:center;gap:var(--s1);
+}
+textarea{
+  width:100%;margin-top:var(--s1);padding:var(--s2);min-height:92px;
+  border:1px solid var(--border);border-radius:var(--r-m);
+  background:var(--surface);resize:none;
+}
+.saved{margin:4px 0 0;font-size:var(--fs-s);color:var(--dim);text-align:center;min-height:12px}
+.saved.bad{color:var(--side);font-weight:600}
+
+/* ── календарь ─────────────────────────────────────────── */
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin:var(--s1) 0 var(--s2)}
+.cal-head .m{font-size:var(--fs-l);font-weight:600}
+.cal-head button{
+  width:44px;height:44px;border:1px solid var(--border);border-radius:var(--r-m);
+  background:var(--surface);font-size:var(--fs-l);line-height:1;
+}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal-dow{font-size:var(--fs-s);color:var(--dim);text-align:center;padding-bottom:2px}
+.cal-cell{
+  aspect-ratio:1;border-radius:var(--r-s);position:relative;
+  display:flex;align-items:center;justify-content:center;
+  font-size:var(--fs-s);background:var(--track);color:var(--dim);
+  border:2px solid transparent;
+}
+.cal-cell[data-lvl="0"]{background:var(--lvl1);color:var(--on-lvl)}
+.cal-cell[data-lvl="1"]{background:var(--lvl1);color:var(--on-lvl)}
+.cal-cell[data-lvl="2"]{background:var(--lvl2);color:var(--on-lvl)}
+.cal-cell[data-lvl="3"]{background:var(--lvl3);color:var(--on-lvl)}
+.cal-cell[data-lvl="4"]{background:var(--lvl4);color:var(--on-lvl);font-weight:600}
+.cal-cell.today{border-color:var(--accent)}
+.cal-cell:disabled{opacity:.3}
+.cal-cell .dot{
+  position:absolute;right:4px;bottom:4px;width:5px;height:5px;
+  border-radius:50%;background:var(--side);
+}
+.cal-cell .mark{
+  position:absolute;left:4px;top:3px;font-size:10px;color:var(--side);line-height:1;
+}
+.legend{display:flex;flex-wrap:wrap;gap:var(--s2);margin:var(--s2) 0;font-size:var(--fs-s);color:var(--dim)}
+.legend i{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:4px}
+.flow-note{font-size:var(--fs-s);color:var(--dim);margin:var(--s2) 0 0;line-height:1.5}
+.meds-h{margin:var(--s4) 0 var(--s1);font-size:var(--fs-l);font-weight:600}
+.ev{display:flex;align-items:center;gap:var(--s1);min-height:48px;border-top:1px solid var(--line)}
+.ev .d{flex:0 0 92px;font-size:var(--fs-s);color:var(--dim)}
+.ev .t{flex:1;font-size:var(--fs-m)}
+.ev .chip{min-height:44px;min-width:44px;justify-content:center}
+#evForm{border-top:1px solid var(--line);padding-top:var(--s2)}
+.cal-cell.future{background:none;border:1px dashed var(--border);color:var(--dim)}
+.cal-cell .plan{
+  position:absolute;left:4px;bottom:4px;width:5px;height:5px;
+  border-radius:50%;background:var(--accent);
+}
+.planline{
+  margin:var(--s1) 0 0;padding:var(--s1) var(--s2);
+  border-left:3px solid var(--accent);background:var(--track);
+  border-radius:var(--r-s);font-size:var(--fs-s);line-height:1.4;
+}
+.planline b{display:block;font-size:var(--fs-s);color:var(--dim);font-weight:400}
+.stub{padding:var(--s4) 0;color:var(--dim);font-size:var(--fs-m)}
+
+/* ── опросники ─────────────────────────────────────────── */
+.card{
+  margin-top:var(--s2);padding:var(--s2);
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-m);
+}
+.q-top{display:flex;align-items:baseline;gap:var(--s1);margin:var(--s2) 0 var(--s1)}
+.q-top .num{font-size:var(--fs-s);color:var(--dim)}
+.q-stem{font-size:var(--fs-s);color:var(--dim);line-height:1.4}
+.q-text{font-size:var(--fs-l);font-weight:600;line-height:1.3;margin:var(--s2) 0 var(--s3)}
+.opt{
+  width:100%;min-height:52px;margin-bottom:var(--s1);padding:0 var(--s2);
+  border:1px solid var(--border);border-radius:var(--r-m);background:var(--surface);
+  text-align:left;display:flex;align-items:center;
+}
+.opt[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.dots-row{display:flex;gap:4px;margin-bottom:var(--s2)}
+.dots-row i{flex:1;height:4px;border-radius:2px;background:var(--track);border:1px solid var(--border)}
+.dots-row i.on{background:var(--accent);border-color:var(--accent)}
+.total{font-family:var(--display);font-size:40px;line-height:1.1;margin:var(--s2) 0 0}
+.credit{font-size:11px;color:var(--dim);line-height:1.45;margin-top:var(--s4)}
+.crisis{
+  margin:var(--s3) 0;padding:var(--s2);
+  border:2px solid var(--side);border-radius:var(--r-m);
+}
+.crisis h3{margin:0 0 var(--s1);font-size:var(--fs-m);color:var(--side)}
+.crisis p{margin:0;font-size:var(--fs-m);line-height:1.5;white-space:pre-wrap}
+
+/* ── отчёт ─────────────────────────────────────────────── */
+.rep-h{margin:0 0 var(--s1);font-family:var(--display);font-size:var(--fs-l);font-weight:400}
+.rep-h3{margin:var(--s3) 0 var(--s1);font-size:var(--fs-m);font-weight:600}
+.rep-lead{margin:0 0 var(--s2);font-size:var(--fs-s);line-height:1.5}
+.rep-p{margin:0;font-size:var(--fs-s);line-height:1.6;color:var(--dim)}
+.rep-note{margin:var(--s1) 0 0;font-size:11px;color:var(--dim);line-height:1.45}
+.rep-t{width:100%;border-collapse:collapse;font-size:var(--fs-s)}
+.rep-t th{text-align:left;font-weight:600;color:var(--dim);padding:4px 6px 4px 0;border-bottom:1px solid var(--border)}
+.rep-t td{padding:5px 6px 5px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.rep-box{height:80px;border:1px solid var(--border);border-radius:var(--r-s)}
+
+@media print{
+  :root, :root[data-theme="dark"]{
+    --bg:#FFFFFF; --surface:#FFFFFF; --track:#EFEFEF;
+    --text:#000000; --dim:#444444; --line:#BBBBBB; --border:#666666;
+    --accent:#2B4F44; --on-accent:#FFFFFF; --sleep:#3F5C72; --side:#8A4A30;
+    --lvl1:#EDEDED; --lvl2:#D6D6D6; --lvl3:#BBBBBB; --lvl4:#9E9E9E; --on-lvl:#000000;
+  }
+  @page{ margin:12mm }
+  html, body{height:auto;overflow:visible;background:#fff}
+  body{display:block}
+  header.top, nav, .yday, .scrim, .sheet, .no-print{display:none !important}
+  main{overflow:visible;padding:0;flex:none}
+  .report{font-size:10.5pt}
+  .rep-t{page-break-inside:avoid}
+  .rep-h3{page-break-after:avoid}
+}
+
+.backchip{
+  min-height:28px;padding:0 var(--s1);border:1px solid var(--border);border-radius:14px;
+  font-size:var(--fs-s);color:var(--text);background:var(--surface);
+}
+.backfill-mark{color:var(--side);font-weight:600}
+
+/* ── экран отказа: чтение не удалось ───────────────────── */
+.blocked{padding:var(--s4) 0}
+.blocked h2{margin:0 0 var(--s2);font-family:var(--display);font-size:var(--fs-l);font-weight:400}
+.blocked p{margin:0 0 var(--s2);font-size:var(--fs-m);line-height:1.5}
+.blocked .why{
+  font-size:var(--fs-s);color:var(--side);font-weight:600;
+  border:1px solid var(--side);border-radius:var(--r-m);padding:var(--s2);margin-bottom:var(--s3);
+}
+.blocked ul{margin:0 0 var(--s3);padding-left:20px;font-size:var(--fs-s);color:var(--dim);line-height:1.6}
+
+nav{
+  display:flex;border-top:1px solid var(--line);background:var(--surface);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+nav button{
+  flex:1;min-height:54px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  color:var(--dim);font-size:var(--fs-s);
+}
+nav button[aria-current="page"]{color:var(--accent);font-weight:600}
+nav svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+
+.scrim{position:fixed;inset:0;z-index:1;background:rgba(20,22,20,.38);display:none}
+.scrim[open]{display:block}
+.sheet{
+  position:fixed;left:0;right:0;bottom:0;z-index:2;
+  background:var(--surface);border-top-left-radius:var(--r-l);border-top-right-radius:var(--r-l);
+  padding:var(--s3) var(--s3) calc(var(--s3) + env(safe-area-inset-bottom));
+  transform:translateY(100%);transition:transform .22s ease;
+  max-height:88dvh;overflow-y:auto;
+}
+.sheet[open]{transform:translateY(0)}
+@media (prefers-reduced-motion: reduce){.sheet{transition:none}}
+.sheet h2{margin:0 0 var(--s2);font-family:var(--display);font-size:var(--fs-l);font-weight:400}
+.sheet p{margin:0 0 var(--s2);font-size:var(--fs-s);color:var(--dim)}
+.btn{
+  width:100%;min-height:48px;margin-bottom:var(--s1);padding:0 var(--s2);
+  border:1px solid var(--border);border-radius:var(--r-m);background:var(--surface);
+  display:flex;align-items:center;justify-content:center;gap:var(--s1);
+}
+.btn.quiet{border-style:dashed;color:var(--dim)}
+.btn.warn{border-color:var(--side);color:var(--side);font-weight:600}
+.grab{width:36px;height:4px;border-radius:2px;background:var(--border);margin:0 auto var(--s2)}
+.fields{display:flex;gap:var(--s1);margin-bottom:var(--s2)}
+.fields label{flex:1;font-size:var(--fs-s);color:var(--dim)}
+.fields input{
+  width:100%;min-height:46px;margin-top:4px;padding:0 var(--s2);
+  border:1px solid var(--border);border-radius:var(--r-m);background:var(--surface);
+  color:var(--text);font-size:var(--fs-m);
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1 id="dateTitle">—</h1>
+    <p class="ctx" id="ctx">—</p>
+  </div>
+  <button class="gear" id="gear" aria-label="Настройки">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.63.67 1.1 1.31 1.1H21a2 2 0 1 1 0 4h-.09c-.64 0-1.17.47-1.31 1.1z"/></svg>
+  </button>
+</header>
+
+<div class="yday" id="yday" hidden></div>
+
+<main id="main"></main>
+
+<nav>
+  <button type="button" data-view="today" aria-current="page">
+    <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4M16 3v4M8 13h8"/></svg>
+    Сегодня
+  </button>
+  <button type="button" data-view="flow">
+    <svg viewBox="0 0 24 24"><path d="M3 15c3 0 3-6 6-6s3 6 6 6 3-6 6-6"/><path d="M3 20h18"/></svg>
+    Течение
+  </button>
+  <button type="button" data-view="scales">
+    <svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+    Шкалы
+  </button>
+  <button type="button" data-view="report">
+    <svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6z"/><path d="M15 2v5h5"/><path d="M9 13h6M9 17h4"/></svg>
+    Отчёт
+  </button>
+</nav>
+
+<div class="scrim" id="scrim"></div>
+<section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Настройки">
+  <div class="grab"></div>
+  <h2>Настройки</h2>
+
+  <p id="curDrug">Что принимаю: не указано</p>
+  <p>Назначения, смены дозы и отмены живут на вкладке «Течение», раздел
+     «Лекарства» — там же их видно на ленте под графиком.</p>
+
+  <p style="margin-top:var(--s3)">Отмечать боль каждый день</p>
+  <div class="seg-wide" role="radiogroup" aria-label="Строка боли" id="painSeg">
+    <button type="button" role="radio" data-p="no">Не нужно</button>
+    <button type="button" role="radio" data-p="yes">Отмечать</button>
+  </div>
+  <p>Антидепрессанты назначают и при хронической боли. Если дело в этом —
+     включите строку, и боль пойдёт на тот же график.</p>
+
+  <p style="margin-top:var(--s3)">Побочки на экране дня</p>
+  <div class="chips wrap" id="sideEdit"></div>
+  <div class="fields" style="margin-top:var(--s1);align-items:flex-end">
+    <label>Своя побочка<input type="text" id="newSide" autocomplete="off" placeholder="звон в ушах"></label>
+    <button class="btn" type="button" id="addSide" style="flex:0 0 108px;margin:0">Добавить</button>
+  </div>
+
+  <p style="margin-top:var(--s3)">План на тяжёлый случай</p>
+  <textarea id="mCrisis" aria-label="План на тяжёлый случай" style="margin-top:0"
+    placeholder="Кому позвонить, какой врач, что помогало раньше"></textarea>
+  <p>Заполняется в спокойный день. Показывается, если в опроснике PHQ-9
+     отмечен пункт про мысли о смерти.</p>
+
+  <p style="margin-top:var(--s3)">Тема</p>
+  <div class="seg-wide" role="radiogroup" aria-label="Тема" id="themeSeg">
+    <button type="button" role="radio" data-t="auto">Как в системе</button>
+    <button type="button" role="radio" data-t="light">Светлая</button>
+    <button type="button" role="radio" data-t="dark">Тёмная</button>
+  </div>
+
+  <p style="margin-top:var(--s3)" id="exportAge">Копию ещё ни разу не скачивали.</p>
+  <button class="btn" type="button" id="exportBtn">Скачать копию журнала</button>
+  <button class="btn quiet" type="button" id="importBtn">Загрузить копию из файла</button>
+
+  <p id="storeNote">Данные остаются на этом телефоне: ни сервера, ни входа, ни облака.</p>
+  <button class="btn quiet" type="button" id="closeSheet">Закрыть</button>
+</section>
+
+<script>
+'use strict';
+/* ═══════════════════════════════════════════════════════════════
+   ХРАНИЛИЩЕ
+   Главное правило: «первый запуск» и «чтение не удалось» — разные
+   состояния. При сбое чтения запись ЗАПРЕЩЕНА и владельцу показан
+   отказ, а не чистый экран. В LEXX смешение этих двух состояний
+   стоило шести дней данных.
+   ═══════════════════════════════════════════════════════════════ */
+const DB_NAME = 'mh-v1';     // НЕ МЕНЯТЬ НИКОГДА
+const DB_VER  = 3;           // 2 — события лекарства, 3 — результаты опросников
+const DAYS = 'days';
+const META = 'meta';
+const EVENTS = 'events';
+const SCORES = 'scores';
+const TIMEOUT = 10000;       // повисшее чтение надо распознавать, а не ждать молча
+
+const params = new URLSearchParams(location.search);
+const FORCE_FAIL = params.get('fail') === '1';   // для проверок и показа отказа руками
+
+let db = null;
+let status = 'loading';      // loading | ready | failed
+let failReason = '';
+let days = new Map();        // дата -> запись
+let skipped = 0;             // битые записи, пропущенные при чтении
+let meta = { drug:'', doseMg:null, startDate:'', lastExport:0, side:null, pain:false, crisis:'' };
+let events = [];             // назначения: старт, смена дозы, отмена
+let scores = [];             // пройденные опросники
+let quiz = null;             // идущее прохождение
+let today = null;            // открытый день (не обязательно сегодняшний)
+let view = 'today';          // today | flow | scales | report
+let calShift = 0;            // сдвиг месяца в календаре
+
+function withTimeout(promise, what){
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('не дождались ' + what + ' за 10 с')), TIMEOUT);
+    promise.then(
+      v => { clearTimeout(t); resolve(v); },
+      e => { clearTimeout(t); reject(e instanceof Error ? e : new Error(String(e))); }
+    );
+  });
+}
+
+function openDB(){
+  if (FORCE_FAIL) return Promise.reject(new Error('чтение отключено флагом ?fail=1'));
+  return withTimeout(new Promise((resolve, reject) => {
+    let req;
+    try { req = indexedDB.open(DB_NAME, DB_VER); }
+    catch (e) { reject(e); return; }
+    // Переход версии только добавляет хранилища: ни одна существующая
+    // запись при этом не трогается.
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      if (!d.objectStoreNames.contains(DAYS))   d.createObjectStore(DAYS,   { keyPath:'date' });
+      if (!d.objectStoreNames.contains(META))   d.createObjectStore(META,   { keyPath:'key' });
+      if (!d.objectStoreNames.contains(EVENTS)) d.createObjectStore(EVENTS, { keyPath:'id' });
+      if (!d.objectStoreNames.contains(SCORES)) d.createObjectStore(SCORES, { keyPath:'id' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error || new Error('база не открылась'));
+    req.onblocked = () => reject(new Error('база занята другой вкладкой'));
+  }), 'открытия базы');
+}
+
+// Разбор по одной записи: битая пропускается, остальные выживают.
+function normalizeDay(raw){
+  if (!raw || typeof raw !== 'object') return null;
+  if (typeof raw.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date)) return null;
+  const n = (v, max) => {
+    const x = Number(v);
+    return Number.isFinite(x) && x >= 0 && x <= max ? x : null;
+  };
+  const day = {
+    date: raw.date,
+    scales: {},
+    sleepTime: typeof raw.sleepTime === 'string' && /^\d{2}:\d{2}$/.test(raw.sleepTime) ? raw.sleepTime : '',
+    sleepH: n(raw.sleepH, 14),
+    sleepDay: n(raw.sleepDay, 10) === null ? 0 : n(raw.sleepDay, 10),
+    intake: ['принял','пропустил','частично'].indexOf(raw.intake) >= 0 ? raw.intake : null,
+    side: {},
+    note: typeof raw.note === 'string' ? raw.note : '',
+    plan: typeof raw.plan === 'string' ? raw.plan : '',
+    backfill: raw.backfill === true,
+    created: typeof raw.created === 'string' ? raw.created : '',
+    updated: typeof raw.updated === 'string' ? raw.updated : ''
+  };
+  if (raw.scales && typeof raw.scales === 'object') {
+    for (const k of Object.keys(raw.scales)) {
+      const v = n(raw.scales[k], 4);
+      if (v !== null) day.scales[k] = Math.round(v);
+    }
+  }
+  if (raw.side && typeof raw.side === 'object') {
+    for (const k of Object.keys(raw.side)) {
+      const v = n(raw.side[k], 3);
+      // Ноль — это «не отмечено». Хранить его нельзя: иначе в отчёте
+      // побочка окажется «отмеченной» во все дни подряд.
+      if (v !== null && v > 0) day.side[k] = Math.round(v);
+    }
+  }
+  return day;
+}
+
+function readDays(){
+  return withTimeout(new Promise((resolve, reject) => {
+    const out = [];
+    let bad = 0, t;
+    try { t = db.transaction(DAYS, 'readonly'); }
+    catch (e) { reject(e); return; }
+    const cur = t.objectStore(DAYS).openCursor();
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (!c) return;
+      try {
+        const v = normalizeDay(c.value);
+        if (v) out.push(v); else bad++;
+      } catch (e) { bad++; }
+      c.continue();
+    };
+    cur.onerror  = () => reject(cur.error || new Error('курсор сломался'));
+    t.oncomplete = () => resolve({ list: out, bad: bad });
+    t.onerror    = () => reject(t.error || new Error('чтение дней не удалось'));
+    t.onabort    = () => reject(t.error || new Error('чтение прервано'));
+  }), 'чтения дней');
+}
+
+function readMeta(){
+  return withTimeout(new Promise((resolve, reject) => {
+    let t;
+    try { t = db.transaction(META, 'readonly'); }
+    catch (e) { reject(e); return; }
+    const req = t.objectStore(META).get('settings');
+    const got = {};
+    req.onsuccess = () => { if (req.result) Object.assign(got, req.result); };
+    t.oncomplete = () => resolve(got);
+    t.onerror    = () => reject(t.error || new Error('чтение настроек не удалось'));
+    t.onabort    = () => reject(t.error || new Error('чтение настроек прервано'));
+  }), 'чтения настроек');
+}
+
+/* ── события лекарства ──────────────────────────────────────────
+   Доза — не поле дня, а событие с интервалом: именно на этом
+   спотыкается eMoods, где смена дозы «на один день» не держится.   */
+const EV_TYPES = ['start', 'dose', 'stop'];
+
+function normalizeEvent(raw){
+  if (!raw || typeof raw !== 'object') return null;
+  if (typeof raw.id !== 'string' || !raw.id) return null;
+  if (typeof raw.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date)) return null;
+  if (EV_TYPES.indexOf(raw.type) < 0) return null;
+  const dose = Number(raw.doseMg);
+  return {
+    id: raw.id,
+    date: raw.date,
+    type: raw.type,
+    drug: typeof raw.drug === 'string' ? raw.drug.slice(0, 60) : '',
+    doseMg: raw.type === 'stop' ? 0
+          : (Number.isFinite(dose) && dose > 0 && dose <= 5000 ? dose : null),
+    note: typeof raw.note === 'string' ? raw.note.slice(0, 200) : ''
+  };
+}
+
+function readEvents(){
+  return withTimeout(new Promise((resolve, reject) => {
+    const out = [];
+    let bad = 0, t;
+    try { t = db.transaction(EVENTS, 'readonly'); }
+    catch (e) { reject(e); return; }
+    const cur = t.objectStore(EVENTS).openCursor();
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (!c) return;
+      try {
+        const v = normalizeEvent(c.value);
+        if (v) out.push(v); else bad++;
+      } catch (e) { bad++; }
+      c.continue();
+    };
+    cur.onerror  = () => reject(cur.error || new Error('курсор событий сломался'));
+    t.oncomplete = () => resolve({ list: out, bad: bad });
+    t.onerror    = () => reject(t.error || new Error('чтение событий не удалось'));
+    t.onabort    = () => reject(t.error || new Error('чтение событий прервано'));
+  }), 'чтения событий');
+}
+
+/* ── опросники ──────────────────────────────────────────────────
+   Формулировки пунктов, варианты ответа и подпись взяты дословно из
+   официальных переводов «Russian for Russia» с phqscreeners.com
+   (скачано 25.11.2026). Пороги — из Instruction Manual того же сайта.
+   По памяти здесь не написано ни слова: в опроснике неверное слово
+   меняет балл.                                                        */
+const QOPTS = ['Ни разу', 'Несколько дней', 'Более недели', 'Почти каждый день'];
+const QCREDIT = 'Разработано докторами Робертом Л. Шпицем (Robert L. Spitzer), ' +
+  'Джанет Б.У. Уилльямс (Janet B.W. Williams), Куртом Кронке (Kurt Kroenke) и их ' +
+  'коллегами в рамках образовательного гранта компании Pfizer Inc. ' +
+  'Воспроизведение, перевод, показ и распространение разрешены.';
+
+const SCALE_DEFS = {
+  phq9: {
+    name: 'PHQ-9',
+    about: 'депрессивные симптомы',
+    stem: 'Как часто за последние 2 недели Вас беспокоили следующие проблемы?',
+    items: [
+      'Вам не хотелось ничего делать',
+      'У Вас было плохое настроение, Вы были подавлены или испытывали чувство безысходности',
+      'Вам было трудно заснуть, у Вас был прерывистый сон, или Вы слишком много спали',
+      'Вы были утомлены, или у Вас было мало сил',
+      'У Вас был плохой аппетит, или Вы переедали',
+      'Вы плохо о себе думали: считали себя неудачником (неудачницей), или были в себе ' +
+        'разочарованы, или считали, что подвели свою семью',
+      'Вам было трудно сосредоточиться (например, на чтении газеты или на просмотре телепередач)',
+      'Вы двигались или говорили настолько медленно, что окружающие это замечали? Или, наоборот, ' +
+        'Вы были настолько суетливы или взбудоражены, что двигались гораздо больше обычного',
+      'Вас посещали мысли о том, что Вам лучше было бы умереть, или о том, чтобы причинить ' +
+        'себе какой-нибудь вред'
+    ],
+    impair: {
+      q: 'Если Вы положительно ответили на какие-нибудь пункты, то оцените, насколько трудно ' +
+         'Вам было работать, заниматься домашними делами или общаться с людьми из-за этих проблем?',
+      opts: ['Совсем не трудно', 'Немного трудно', 'Очень трудно', 'Чрезвычайно трудно']
+    },
+    max: 27,
+    // Instruction Manual: «Scores of 5, 10, 15, and 20 represent cutpoints for
+    // mild, moderate, moderately severe and severe depression, respectively.»
+    bands: [[20, 'тяжёлая'], [15, 'умеренно тяжёлая'], [10, 'умеренная'], [5, 'лёгкая']],
+    riskItem: 8   // девятый пункт — мысли о смерти
+  },
+  gad7: {
+    name: 'GAD-7',
+    about: 'тревожные симптомы',
+    stem: 'Как часто Вас за последние 14 дней беспокоили следующие проблемы?',
+    items: [
+      'Вы нервничали, тревожились или испытывали сильный стресс',
+      'Вы были неспособны успокоиться или контролировать свое волнение',
+      'Вы слишком сильно волновались по различным поводам',
+      'Вам было трудно расслабиться',
+      'Вы были настолько суетливы, что Вам было тяжело усидеть на месте',
+      'Вы легко злились или раздражались',
+      'Вы испытывали страх, словно должно произойти нечто ужасное'
+    ],
+    impair: null,
+    max: 21,
+    // Instruction Manual: «Scores of 5, 10, and 15 represent cutpoints for
+    // mild, moderate, and severe anxiety, respectively.»
+    bands: [[15, 'тяжёлая'], [10, 'умеренная'], [5, 'лёгкая']],
+    riskItem: -1
+  }
+};
+
+function bandOf(scale, total){
+  const def = SCALE_DEFS[scale];
+  for (const b of def.bands) if (total >= b[0]) return b[1];
+  return 'ниже порога лёгкой';
+}
+
+function normalizeScore(raw){
+  if (!raw || typeof raw !== 'object') return null;
+  if (typeof raw.id !== 'string' || !raw.id) return null;
+  if (typeof raw.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date)) return null;
+  const def = SCALE_DEFS[raw.scale];
+  if (!def) return null;
+  if (!Array.isArray(raw.answers) || raw.answers.length !== def.items.length) return null;
+  const ans = [];
+  for (const v of raw.answers) {
+    const x = Number(v);
+    if (!Number.isFinite(x) || x < 0 || x > 3) return null;
+    ans.push(Math.round(x));
+  }
+  const im = Number(raw.impair);
+  return {
+    id: raw.id, date: raw.date, scale: raw.scale, answers: ans,
+    total: ans.reduce((a, b) => a + b, 0),
+    impair: Number.isFinite(im) && im >= 0 && im <= 3 ? Math.round(im) : null
+  };
+}
+
+function readScores(){
+  return withTimeout(new Promise((resolve, reject) => {
+    const out = [];
+    let bad = 0, t;
+    try { t = db.transaction(SCORES, 'readonly'); }
+    catch (e) { reject(e); return; }
+    const cur = t.objectStore(SCORES).openCursor();
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (!c) return;
+      try {
+        const v = normalizeScore(c.value);
+        if (v) out.push(v); else bad++;
+      } catch (e) { bad++; }
+      c.continue();
+    };
+    cur.onerror  = () => reject(cur.error || new Error('курсор опросников сломался'));
+    t.oncomplete = () => resolve({ list: out, bad: bad });
+    t.onerror    = () => reject(t.error || new Error('чтение опросников не удалось'));
+    t.onabort    = () => reject(t.error || new Error('чтение опросников прервано'));
+  }), 'чтения опросников');
+}
+
+function del(store, key){
+  if (status !== 'ready') return Promise.reject(new Error('удаление запрещено: ' + status));
+  return withTimeout(new Promise((resolve, reject) => {
+    let t;
+    try { t = db.transaction(store, 'readwrite'); }
+    catch (e) { reject(e); return; }
+    t.objectStore(store).delete(key);
+    t.oncomplete = () => resolve(true);
+    t.onerror    = () => reject(t.error || new Error('удаление не прошло'));
+    t.onabort    = () => reject(t.error || new Error('удаление прервано'));
+  }), 'удаления');
+}
+
+function write(store, value){
+  if (status !== 'ready') return Promise.reject(new Error('запись запрещена: ' + status));
+  return withTimeout(new Promise((resolve, reject) => {
+    let t;
+    try { t = db.transaction(store, 'readwrite'); }
+    catch (e) { reject(e); return; }
+    t.objectStore(store).put(value);
+    t.oncomplete = () => resolve(true);
+    t.onerror    = () => reject(t.error || new Error('запись не прошла'));
+    t.onabort    = () => reject(t.error || new Error('запись прервана'));
+  }), 'записи');
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ДЕНЬ
+   ═══════════════════════════════════════════════════════════════ */
+const SCALES = [
+  { id:'low',  name:'Спад',     words:['нет','чуть','заметно','сильно','очень'] },
+  { id:'int',  name:'Интерес',  words:['как обычно','чуть меньше','заметно меньше','почти нет','нет совсем'] },
+  { id:'anx',  name:'Тревога',  words:['нет','чуть','заметно','сильно','очень'] },
+  { id:'up',   name:'Подъём',   words:['нет','чуть','заметно','сильно','очень'] },
+  { id:'blunt',name:'Чувства',  words:['как обычно','чуть глуше','заметно глуше','почти не чувствую','пусто'] },
+  // Все шесть шкал идут в одну сторону: больше — хуже. Иначе график
+  // пришлось бы читать в две стороны одновременно.
+  { id:'func', name:'Дела',     words:['как обычно','почти всё','часть','очень мало','ничего'] },
+  // Необязательная строка: антидепрессанты назначают и при хронической и
+  // нейропатической боли (Cochrane PMID 36269595, дулоксетин PMID 19208243,
+  // обзор PMID 39449766). Кому назначили из-за боли — для того боль и есть
+  // главный исход. Включается в настройках.
+  { id:'pain', name:'Боль',     words:['нет','слабая','средняя','сильная','очень сильная'], optional:true }
+];
+function visibleScales(){
+  return SCALES.filter(s => !s.optional || meta.pain === true);
+}
+
+// Список по умолчанию — не по памяти: перечень нежелательных явлений класса
+// СИОЗС из обзора CNS Drugs (PMID 23338224), порядок как в источнике.
+// Эмоциональное притупление сюда не входит: это ежедневная шкала «Чувства».
+const SIDE_DEFAULT = ['Тошнота','Головная боль','Сонливость','Сухость во рту','Тремор',
+                      'Бессонница','Слабость','Потливость','Запор','Головокружение',
+                      'Сексуальные нарушения','Раздражительность','Туман в голове'];
+const SIDE_ON_BY_DEFAULT = 6;           // первые шесть показываем сразу
+const SEV = ['', 'слабо', 'средне', 'сильно'];
+
+function sideList(){
+  if (!Array.isArray(meta.side) || !meta.side.length) {
+    meta.side = SIDE_DEFAULT.map((n, i) => ({ n:n, on:i < SIDE_ON_BY_DEFAULT }));
+  }
+  return meta.side;
+}
+// Как часто владелец отмечал эту побочку за последний месяц.
+function sideFreq(name){
+  const from = isoShift(isoToday(), -30);
+  let c = 0;
+  days.forEach(d => { if (d.date >= from && d.side && d.side[name] > 0) c++; });
+  return c;
+}
+// На экране сначала то, что отмечается чаще; при равенстве — порядок списка.
+function activeSides(){
+  const list = sideList().filter(s => s.on).map(s => s.n);
+  const pos = {};
+  list.forEach((n, i) => { pos[n] = i; });
+  return list.sort((a, b) => (sideFreq(b) - sideFreq(a)) || (pos[a] - pos[b]));
+}
+function chipText(name, sev){ return sev ? name + ' · ' + SEV[sev] : name; }
+const MONTHS = ['января','февраля','марта','апреля','мая','июня',
+                'июля','августа','сентября','октября','ноября','декабря'];
+const MONTHS_N = ['Январь','Февраль','Март','Апрель','Май','Июнь',
+                  'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const INTAKE = ['принял','пропустил','частично'];
+
+function isoToday(){
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+function isoShift(iso, delta){
+  const parts = iso.split('-').map(Number);
+  const dt = new Date(parts[0], parts[1] - 1, parts[2] + delta);
+  const p = n => String(n).padStart(2, '0');
+  return dt.getFullYear() + '-' + p(dt.getMonth() + 1) + '-' + p(dt.getDate());
+}
+function human(iso){
+  const parts = iso.split('-').map(Number);
+  return parts[2] + ' ' + MONTHS[parts[1] - 1];
+}
+function daysBetween(a, b){
+  const x = a.split('-').map(Number), y = b.split('-').map(Number);
+  return Math.round((Date.UTC(y[0], y[1] - 1, y[2]) - Date.UTC(x[0], x[1] - 1, x[2])) / 86400000);
+}
+
+function blankDay(date){
+  return { date:date, scales:{}, sleepTime:'', sleepH:null, sleepDay:0, intake:null,
+           side:{}, note:'', plan:'', backfill:false,
+           created:new Date().toISOString(), updated:'' };
+}
+
+// Сон наследуется от последнего заполненного дня: обычный день — семь
+// касаний, потому что неизменившееся трогать не нужно.
+function inherit(day){
+  if (day.date > isoToday()) return day;   // будущему дню наследовать нечего
+  const prev = [...days.values()]
+    .filter(d => d.date < day.date && d.sleepTime)
+    .sort((a, b) => a.date < b.date ? 1 : -1)[0];
+  if (prev) {
+    day.sleepTime = prev.sleepTime;
+    day.sleepH = prev.sleepH;
+    day.inherited = true;
+  }
+  return day;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ЭКРАН
+   ═══════════════════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+
+// Текст владельца уходит в разметку только через это.
+const ESCAPES = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' };
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ESCAPES[c]); }
+
+function flash(text, bad){
+  const el = $('saved');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('bad', !!bad);
+  clearTimeout(flash.t);
+  flash.t = setTimeout(() => { el.textContent = ''; el.classList.remove('bad'); },
+                       bad ? 6000 : 1800);
+}
+
+let saveTimer = null;
+function queueSave(){
+  if (status !== 'ready') { flash('Данные не читаются — ввод не сохранён', true); return; }
+  // День, заполненный не в свой день, помечается: врачу важно отличать
+  // запись дня от воспоминания о нём.
+  if (today.date < isoToday()) today.backfill = true;
+  today.updated = new Date().toISOString();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const copy = Object.assign({}, today);
+    delete copy.inherited;
+    write(DAYS, copy).then(
+      () => { days.set(copy.date, copy); flash('Записано'); renderHeader(); },
+      e  => flash('Не сохранилось: ' + e.message, true)
+    );
+  }, 250);
+}
+
+function sortedEvents(){
+  return events.slice().sort((a, b) => a.date < b.date ? -1 : (a.date > b.date ? 1 : 0));
+}
+// Что принималось в этот день: последнее событие на дату или раньше.
+function regimenAt(iso){
+  let cur = null;
+  for (const e of sortedEvents()) {
+    if (e.date <= iso) cur = e; else break;
+  }
+  if (!cur) return null;
+  if (cur.type === 'stop') return { drug:cur.drug, doseMg:0, stopped:true, since:cur.date };
+  return { drug:cur.drug, doseMg:cur.doseMg, stopped:false, since:cur.date };
+}
+function firstStart(){
+  const s = sortedEvents().filter(e => e.type === 'start')[0];
+  return s ? s.date : '';
+}
+function newId(){
+  return 'ev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+}
+function dosePhrase(iso){
+  const r = regimenAt(iso || (today ? today.date : isoToday()));
+  if (!r) return '';
+  if (r.stopped) return (r.drug ? r.drug + ': ' : '') + 'отменён';
+  return r.drug + (r.doseMg ? ' ' + r.doseMg + ' мг' : '');
+}
+
+function renderHeader(){
+  $('dateTitle').textContent = today ? human(today.date) : human(isoToday());
+  let line = dosePhrase(today.date);
+  if (!line) {
+    line = 'препарат не указан — «Течение», раздел «Лекарства»';
+  } else {
+    const start = firstStart();
+    if (start) {
+      const n = daysBetween(start, today.date) + 1;
+      if (n >= 1) line = 'день ' + n + ' · ' + line;
+    }
+  }
+  $('ctx').textContent = line;
+
+  const y = $('yday');
+  if (view !== 'today') { y.hidden = true; return; }
+
+  // Открыт не сегодняшний день — вместо подсказки про вчера даём дорогу назад.
+  if (today.date !== isoToday()) {
+    y.hidden = false;
+    y.innerHTML = '<button class="backchip" id="backToday">← Сегодня</button>' +
+      (today.backfill ? '<span class="backfill-mark">заполнено позже</span>' : '');
+    $('backToday').addEventListener('click', () => openDay(isoToday()));
+    return;
+  }
+
+  const prevIso = isoShift(today.date, -1);
+  const prev = days.get(prevIso);
+  const empty = !prev || (Object.keys(prev.scales).length === 0 && prev.intake === null);
+  y.hidden = !(status === 'ready' && empty);
+  if (!y.hidden) {
+    y.innerHTML = 'Вчера не заполнено <b id="openPrev">' + human(prevIso) + ' →</b>';
+    $('openPrev').addEventListener('click', () => openDay(prevIso));
+  }
+}
+
+// Открыть любой день: он становится редактируемым, как сегодняшний.
+function openDay(iso){
+  today = days.has(iso) ? Object.assign({}, days.get(iso)) : inherit(blankDay(iso));
+  view = 'today';
+  render();
+}
+
+// Прокрутка сбрасывается только при смене экрана. Внутри одного экрана
+// перерисовка идёт на каждое касание шкалы — прыгать наверх там нельзя.
+let shownKey = '';
+
+function render(){
+  if (status !== 'ready') { renderFailure(); renderSheet(); return; }
+  const key = view + '|' + today.date;
+  const fresh = key !== shownKey;
+  shownKey = key;
+  if (view === 'flow') renderFlow();
+  else if (view === 'today') (today.date > isoToday() ? renderPlan() : renderDay());
+  else if (view === 'scales') renderScales();
+  else renderReport();
+  if (fresh) { const m = $('main'); if (m) m.scrollTop = 0; }
+  renderHeader();
+  document.querySelectorAll('nav button').forEach(b => {
+    if (b.dataset.view === view) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
+}
+
+/* ── отчёт для врача ──────────────────────────────────────────
+   Одна страница на печать. Главное в шапке — сколько дней из периода
+   заполнено: врач должен видеть не только цифры, но и их надёжность. */
+let reportSpan = 30;        // 30 | 90 | 0 — «с начала приёма»
+
+function hasAnyData(d){
+  return Object.keys(d.scales).length > 0 || d.intake !== null ||
+         !!d.sleepTime || !!d.note;
+}
+
+function reportRange(){
+  const to = isoToday();
+  let from;
+  if (reportSpan === 0) {
+    const start = firstStart();
+    const oldest = [...days.keys()].sort()[0];
+    from = start || oldest || to;
+    if (oldest && oldest < from) from = oldest;
+  } else {
+    from = isoShift(to, -(reportSpan - 1));
+  }
+  return { from: from, to: to, n: daysBetween(from, to) + 1 };
+}
+
+function reportStats(from, to){
+  const list = [...days.values()]
+    .filter(d => d.date >= from && d.date <= to)
+    .sort((a, b) => a.date < b.date ? -1 : 1);
+  const side = {};
+  list.forEach(d => Object.keys(d.side || {}).forEach(k => {
+    if (!(d.side[k] > 0)) return;
+    if (!side[k]) side[k] = { n: 0, sum: 0 };
+    side[k].n++; side[k].sum += d.side[k];
+  }));
+  const means = {};
+  visibleScales().forEach(sc => {
+    const v = list.map(d => d.scales[sc.id]).filter(x => x !== undefined);
+    means[sc.id] = v.length ? { avg: v.reduce((a, b) => a + b, 0) / v.length, n: v.length } : null;
+  });
+  return {
+    list: list,
+    filled: list.filter(hasAnyData).length,
+    misses: list.filter(d => d.intake === 'пропустил').map(d => d.date),
+    partial: list.filter(d => d.intake === 'частично').length,
+    side: Object.keys(side).map(k => ({ name: k, n: side[k].n, avg: side[k].sum / side[k].n }))
+            .sort((a, b) => b.n - a.n).slice(0, 5),
+    means: means,
+    scores: scores.filter(s => s.date >= from && s.date <= to)
+              .sort((a, b) => a.date < b.date ? -1 : 1),
+    events: sortedEvents().filter(e => e.date <= to)
+  };
+}
+
+function renderReport(){
+  const r = reportRange();
+  const st = reportStats(r.from, r.to);
+  const fix = v => v.toFixed(1).replace('.', ',');
+
+  const doses = st.events.length
+    ? st.events.map(e => human(e.date) + ' — ' + evLabel(e)).join('<br>')
+    : 'назначений не записано';
+
+  const scaleRows = visibleScales().map(sc => {
+    const m = st.means[sc.id];
+    return '<tr><td>' + sc.name + '</td><td>' + (m ? fix(m.avg) : '—') +
+           '</td><td>' + (m ? m.n : 0) + '</td></tr>';
+  }).join('');
+
+  const scoreRows = st.scores.length
+    ? st.scores.map(s => '<tr><td>' + human(s.date) + '</td><td>' +
+        SCALE_DEFS[s.scale].name + '</td><td>' + s.total + ' из ' + SCALE_DEFS[s.scale].max +
+        '</td><td>' + bandOf(s.scale, s.total) + '</td></tr>').join('')
+    : '<tr><td colspan="4">за период не проходили</td></tr>';
+
+  const sideRows = st.side.length
+    ? st.side.map(s => '<tr><td>' + esc(s.name) + '</td><td>' + s.n + '</td><td>' +
+        fix(s.avg) + ' из 3</td></tr>').join('')
+    : '<tr><td colspan="3">не отмечались</td></tr>';
+
+  $('main').innerHTML =
+    '<div class="seg-wide no-print" role="radiogroup" aria-label="Период отчёта" id="repSeg" ' +
+        'style="margin:var(--s1) 0 var(--s2)">' +
+      ['30', '90', '0'].map(v => '<button type="button" role="radio" data-s="' + v + '" ' +
+        'aria-checked="' + (reportSpan === Number(v)) + '">' +
+        (v === '0' ? 'С начала' : v + ' дней') + '</button>').join('') +
+    '</div>' +
+
+    '<div class="report" id="report">' +
+      '<h2 class="rep-h">Дневник состояния · ' + human(r.from) + ' — ' + human(r.to) + '</h2>' +
+      '<p class="rep-lead"><b>Заполнено ' + st.filled + ' из ' + r.n + ' дней.</b> ' +
+        'Пропусков приёма ' + st.misses.length +
+        (st.partial ? ', частичных приёмов ' + st.partial : '') + '. ' +
+        'Шкалы: 0 — нет симптома, 4 — максимум.</p>' +
+
+      chartSvg(r.n) +
+
+      '<h3 class="rep-h3">Назначения</h3>' +
+      '<p class="rep-p">' + doses + '</p>' +
+
+      '<h3 class="rep-h3">Среднее за период</h3>' +
+      '<table class="rep-t"><thead><tr><th>Шкала</th><th>Среднее</th><th>Дней</th></tr></thead>' +
+        '<tbody>' + scaleRows + '</tbody></table>' +
+
+      '<h3 class="rep-h3">Опросники</h3>' +
+      '<table class="rep-t"><thead><tr><th>Дата</th><th>Шкала</th><th>Балл</th><th>Ступень</th></tr></thead>' +
+        '<tbody>' + scoreRows + '</tbody></table>' +
+      '<p class="rep-note">Пороги PHQ-9: 5 / 10 / 15 / 20. GAD-7: 5 / 10 / 15. ' +
+        'Источник — Instruction Manual, phqscreeners.com.</p>' +
+
+      '<h3 class="rep-h3">Побочные эффекты</h3>' +
+      '<table class="rep-t"><thead><tr><th>Что</th><th>Дней</th><th>Средняя тяжесть</th></tr></thead>' +
+        '<tbody>' + sideRows + '</tbody></table>' +
+
+      (st.misses.length
+        ? '<h3 class="rep-h3">Пропуски приёма</h3><p class="rep-p">' +
+          st.misses.map(human).join(', ') + '</p>'
+        : '') +
+
+      '<h3 class="rep-h3">Заметки врача</h3>' +
+      '<div class="rep-box"></div>' +
+      '<p class="rep-note">Данные введены самим пациентом. Это не диагноз и не оценка ' +
+        'лечения. Напечатано ' + human(isoToday()) + '.</p>' +
+    '</div>' +
+
+    '<button class="btn no-print" type="button" id="repPrint" style="margin-top:var(--s3)">' +
+      'Распечатать или сохранить в PDF</button>' +
+    '<p class="flow-note no-print">На айфоне: кнопка откроет системную печать — ' +
+      'оттуда «Поделиться» сохраняет PDF в Файлы.</p>' +
+    '<p class="saved no-print" id="saved"></p>';
+
+  document.querySelectorAll('#repSeg button').forEach(b =>
+    b.addEventListener('click', () => { reportSpan = Number(b.dataset.s); render(); }));
+  $('repPrint').addEventListener('click', () => window.print());
+}
+
+/* ── экран «Шкалы» ───────────────────────────────────────────── */
+// Расписание: 0 / 2 / 4 / 6 / 8 недель от первого назначения, дальше раз
+// в четыре недели. Рубеж второй недели — тот самый ранний признак.
+function nextDue(scale){
+  const start = firstStart();
+  if (!start) return null;
+  const done = scores.filter(s => s.scale === scale).sort((a, b) => a.date < b.date ? -1 : 1);
+  const last = done.length ? done[done.length - 1].date : null;
+  const plan = [0, 2, 4, 6, 8].map(w => isoShift(start, w * 7));
+  for (let i = 1; i <= 26; i++) plan.push(isoShift(start, 56 + i * 28));
+  for (const p of plan) if (!last || p > last) return p;
+  return null;
+}
+
+function crisisBlock(){
+  const text = (meta.crisis || '').trim();
+  return '<div class="crisis"><h3>Ваш план на такой случай</h3><p>' +
+    (text ? esc(text)
+          : 'План не заполнен. Его заполняют в спокойный день — в настройках: ' +
+            'кому позвонить, какой врач, что помогало раньше.') +
+    '</p></div>';
+}
+
+function renderScales(){
+  if (quiz) { renderQuiz(); return; }
+  const cards = ['phq9', 'gad7'].map(k => {
+    const def = SCALE_DEFS[k];
+    const done = scores.filter(s => s.scale === k).sort((a, b) => a.date < b.date ? 1 : -1);
+    const last = done[0];
+    const due = nextDue(k);
+    const dueText = !due ? 'расписание начнётся с первого назначения'
+      : (due <= isoToday() ? 'пора пройти' : 'следующий раз ' + human(due));
+    return '<div class="card">' +
+      '<div class="cap"><span class="n">' + def.name + '</span>' +
+        '<span class="v">' + def.about + '</span></div>' +
+      '<p class="flow-note" style="margin:0 0 var(--s1)">' +
+        (last ? 'Последний: <b>' + last.total + '</b> из ' + def.max + ' — ' +
+                bandOf(k, last.total) + ', ' + human(last.date)
+              : 'Ещё не проходили.') + ' · ' + dueText + '</p>' +
+      (done.length > 1
+        ? '<p class="flow-note" style="margin:0 0 var(--s1)">' +
+          done.slice(0, 6).map(s => human(s.date) + ' — ' + s.total).join(' · ') + '</p>'
+        : '') +
+      '<button class="btn" type="button" data-start="' + k + '">Пройти ' + def.name + '</button>' +
+    '</div>';
+  }).join('');
+
+  $('main').innerHTML = cards +
+    '<p class="flow-note">Формулировки и варианты ответа — официальный русский перевод ' +
+      'с phqscreeners.com. Приложение считает сумму и показывает ступень тяжести ' +
+      'из инструкции того же сайта, и ничего не трактует: что делать с баллом, ' +
+      'решает врач.</p>' +
+    '<p class="credit">' + QCREDIT + '</p>' +
+    '<p class="saved" id="saved"></p>';
+
+  document.querySelectorAll('[data-start]').forEach(b =>
+    b.addEventListener('click', () => {
+      quiz = { scale: b.dataset.start, idx: 0, answers: [], impair: null };
+      render();
+    }));
+}
+
+function renderQuiz(){
+  const def = SCALE_DEFS[quiz.scale];
+  const n = def.items.length;
+  const sum = quiz.answers.reduce((a, b) => a + (b || 0), 0);
+  const askImpair = !!def.impair && quiz.answers.length === n && sum > 0 && quiz.idx === n;
+  const finished = quiz.idx > n || (quiz.idx === n && !askImpair);
+
+  if (finished) { renderQuizResult(); return; }
+
+  const opts = askImpair ? def.impair.opts : QOPTS;
+  const text = askImpair ? def.impair.q : def.items[quiz.idx];
+  const cur  = askImpair ? quiz.impair : quiz.answers[quiz.idx];
+
+  $('main').innerHTML =
+    '<div class="q-top"><span class="num">' + def.name + ' · вопрос ' +
+      (quiz.idx + 1) + ' из ' + (n + (def.impair ? 1 : 0)) + '</span></div>' +
+    '<div class="dots-row">' +
+      Array.from({ length: n + (def.impair ? 1 : 0) },
+        (_, i) => '<i class="' + (i < quiz.idx ? 'on' : '') + '"></i>').join('') +
+    '</div>' +
+    (askImpair ? '' : '<p class="q-stem">' + def.stem + '</p>') +
+    '<p class="q-text">' + text + '</p>' +
+    opts.map((o, i) => '<button class="opt" type="button" data-v="' + i + '" ' +
+      'aria-pressed="' + (cur === i ? 'true' : 'false') + '">' + o + '</button>').join('') +
+    '<div style="display:flex;gap:var(--s1);margin-top:var(--s2)">' +
+      (quiz.idx > 0 ? '<button class="btn quiet" type="button" id="qBack">Назад</button>' : '') +
+      '<button class="btn quiet" type="button" id="qExit">Выйти</button>' +
+    '</div>' +
+    '<p class="saved" id="saved"></p>';
+
+  document.querySelectorAll('.opt').forEach(b =>
+    b.addEventListener('click', () => {
+      const v = Number(b.dataset.v);
+      if (askImpair) quiz.impair = v; else quiz.answers[quiz.idx] = v;
+      quiz.idx++;
+      render();
+    }));
+  if ($('qBack')) $('qBack').addEventListener('click', () => { quiz.idx--; render(); });
+  $('qExit').addEventListener('click', () => { quiz = null; render(); });
+}
+
+function renderQuizResult(){
+  const def = SCALE_DEFS[quiz.scale];
+  const total = quiz.answers.reduce((a, b) => a + (b || 0), 0);
+  const risk = def.riskItem >= 0 && quiz.answers[def.riskItem] > 0;
+  const cuts = def.bands.slice().reverse().map(b => b[0]).join(' / ');
+
+  $('main').innerHTML =
+    '<div class="q-top"><span class="num">' + def.name + ' · результат</span></div>' +
+    '<p class="total">' + total + ' <span style="font-size:var(--fs-m);color:var(--dim)">из ' +
+      def.max + '</span></p>' +
+    '<p class="q-text" style="margin-top:var(--s1)">' + bandOf(quiz.scale, total) + '</p>' +
+    '<p class="flow-note">Ступени по Instruction Manual с phqscreeners.com: ' +
+      'пороги ' + cuts + '. Это не диагноз и не оценка лечения — это один замер, ' +
+      'который имеет смысл рядом с предыдущими.</p>' +
+    (risk ? crisisBlock() : '') +
+    '<button class="btn" type="button" id="qSave" style="margin-top:var(--s3)">Сохранить результат</button>' +
+    '<button class="btn quiet" type="button" id="qRedo">Пройти заново</button>' +
+    '<button class="btn quiet" type="button" id="qExit">Выйти без сохранения</button>' +
+    '<p class="saved" id="saved"></p>';
+
+  $('qSave').addEventListener('click', async () => {
+    const rec = normalizeScore({
+      id: 'sc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
+      date: isoToday(), scale: quiz.scale, answers: quiz.answers, impair: quiz.impair
+    });
+    if (!rec) { flash('Ответы не сошлись — результат не сохранён', true); return; }
+    try {
+      await write(SCORES, rec);
+      scores.push(rec);
+      quiz = null;
+      render();
+      flash('Результат сохранён');
+    } catch (e) { flash('Не сохранилось: ' + e.message, true); }
+  });
+  $('qRedo').addEventListener('click', () => {
+    quiz = { scale: quiz.scale, idx: 0, answers: [], impair: null };
+    render();
+  });
+  $('qExit').addEventListener('click', () => { quiz = null; render(); });
+}
+
+function renderFailure(){
+  $('yday').hidden = true;
+  $('dateTitle').textContent = human(isoToday());
+  $('ctx').textContent = 'журнал не прочитан';
+  $('main').innerHTML =
+    '<div class="blocked">' +
+      '<h2>Не удалось прочитать журнал</h2>' +
+      '<div class="why" id="whyText"></div>' +
+      '<p>Ввод сейчас закрыт намеренно. Пустой журнал и «журнал не читается» — ' +
+         'разные вещи: если писать поверх непрочитанного, прежние записи будут затёрты.</p>' +
+      '<ul>' +
+        '<li>Закройте другие вкладки с приложением и нажмите «Попробовать снова».</li>' +
+        '<li>Если это приватное окно Safari — откройте обычное.</li>' +
+        '<li>Не очищайте данные сайта: записи на месте, их просто не удалось прочитать.</li>' +
+      '</ul>' +
+      '<button class="btn warn" type="button" id="retry">Попробовать снова</button>' +
+      '<p class="saved" id="saved"></p>' +
+    '</div>';
+  $('whyText').textContent = failReason;
+  $('retry').addEventListener('click', () => { boot(); });
+}
+
+// Будущий день: оценивать нечего, но план записать можно.
+function renderPlan(){
+  $('main').innerHTML =
+    '<div class="block" style="border-top:0">' +
+      '<div class="cap"><span class="n">План на этот день</span></div>' +
+      '<textarea id="planArea" aria-label="План на день" ' +
+        'placeholder="например, приём у врача в 15:00"></textarea>' +
+    '</div>' +
+    '<p class="flow-note">Это день впереди: оценить его нельзя, записать план — можно. ' +
+      'План покажется на экране дня, когда этот день наступит. Системных ' +
+      'уведомлений в веб-версии нет — для них событие надо класть в Календарь телефона.</p>' +
+    '<p class="saved" id="saved"></p>';
+  const ta = $('planArea');
+  ta.value = today.plan || '';
+  ta.addEventListener('input', () => { today.plan = ta.value; queueSave(); });
+}
+
+// Ближайшие планы на две недели — показываются на экране «Течение».
+function nextPlans(){
+  const from = isoToday(), to = isoShift(from, 14);
+  const list = [...days.values()]
+    .filter(d => d.plan && d.date >= from && d.date <= to)
+    .sort((a, b) => a.date < b.date ? -1 : 1)
+    .slice(0, 5);
+  if (!list.length) return '';
+  return '<div class="planline"><b>Впереди</b>' +
+    list.map(d => esc(human(d.date)) + ' — ' + esc(d.plan)).join('<br>') + '</div>';
+}
+
+function renderDay(){
+  $('main').innerHTML =
+    (today.plan ? '<div class="planline"><b>На сегодня</b>' + esc(today.plan) + '</div>' : '') +
+    '<div id="scales"></div>' +
+    '<div class="block">' +
+      '<div class="cap"><span class="n">Сон</span><span class="v" id="sleepV"></span></div>' +
+      '<div class="sleep-row">' +
+        '<input type="time" class="pill" id="sleepTime" aria-label="Время отбоя">' +
+        '<div class="step">' +
+          '<button type="button" aria-label="Меньше ночного сна" data-h="-0.5">−</button>' +
+          '<span class="val" id="hrs">—</span>' +
+          '<button type="button" aria-label="Больше ночного сна" data-h="0.5">+</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="sleep-row" style="margin-top:6px">' +
+        '<span class="daylbl">Днём</span>' +
+        '<div class="step">' +
+          '<button type="button" aria-label="Меньше дневного сна" data-d="-0.5">−</button>' +
+          '<span class="val" id="hrsDay">0 ч</span>' +
+          '<button type="button" aria-label="Больше дневного сна" data-d="0.5">+</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="block">' +
+      '<div class="cap"><span class="n">Приём</span><span class="v" id="intakeV"></span></div>' +
+      '<div class="seg-wide" role="radiogroup" aria-label="Приём препарата" id="intakeSeg">' +
+        '<button type="button" role="radio" aria-checked="false">Принял</button>' +
+        '<button type="button" role="radio" aria-checked="false">Пропустил</button>' +
+        '<button type="button" role="radio" aria-checked="false">Частично</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="block">' +
+      '<div class="cap"><span class="n">Побочки</span><span class="v">нажать — слабо, ещё раз — сильнее</span></div>' +
+      '<div class="chips" id="chips"></div>' +
+    '</div>' +
+    '<button class="note" type="button" id="noteBtn"></button>' +
+    '<p class="saved" id="saved"></p>';
+
+  const host = $('scales');
+  visibleScales().forEach(sc => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML =
+      '<div class="lbl"><span class="n">' + sc.name + '</span>' +
+      '<span class="v" id="v-' + sc.id + '"></span></div>' +
+      '<div class="seg" role="radiogroup" aria-label="' + sc.name + '"></div>';
+    const seg = row.querySelector('.seg');
+    const cur = today.scales[sc.id];
+    for (let i = 0; i < 5; i++){
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', cur === i ? 'true' : 'false');
+      b.setAttribute('aria-label', sc.name + ': ' + sc.words[i]);
+      b.textContent = String(i);
+      b.addEventListener('click', () => {
+        today.scales[sc.id] = i;
+        seg.querySelectorAll('button').forEach((x, j) =>
+          x.setAttribute('aria-checked', j === i ? 'true' : 'false'));
+        $('v-' + sc.id).textContent = sc.words[i];
+        queueSave();
+      });
+      seg.appendChild(b);
+    }
+    host.appendChild(row);
+    $('v-' + sc.id).textContent = cur === undefined ? '—' : sc.words[cur];
+  });
+
+  $('sleepTime').value = today.sleepTime || '';
+  $('hrs').textContent = today.sleepH === null || today.sleepH === undefined
+    ? '—' : String(today.sleepH).replace('.', ',') + ' ч';
+  $('sleepV').textContent = today.inherited ? 'как вчера' : '';
+  $('sleepTime').addEventListener('change', e => {
+    today.sleepTime = e.target.value;
+    today.inherited = false;
+    $('sleepV').textContent = '';
+    queueSave();
+  });
+  document.querySelectorAll('.step button[data-h]').forEach(b => {
+    b.addEventListener('click', () => {
+      const base = (today.sleepH === null || today.sleepH === undefined) ? 7.5 : today.sleepH;
+      today.sleepH = Math.min(14, Math.max(0, base + parseFloat(b.dataset.h)));
+      today.inherited = false;
+      $('hrs').textContent = String(today.sleepH).replace('.', ',') + ' ч';
+      $('sleepV').textContent = '';
+      queueSave();
+    });
+  });
+
+  // Дневной сон не наследуется: это событие дня, а не привычка.
+  $('hrsDay').textContent = String(today.sleepDay || 0).replace('.', ',') + ' ч';
+  document.querySelectorAll('.step button[data-d]').forEach(b => {
+    b.addEventListener('click', () => {
+      today.sleepDay = Math.min(10, Math.max(0, (today.sleepDay || 0) + parseFloat(b.dataset.d)));
+      $('hrsDay').textContent = String(today.sleepDay).replace('.', ',') + ' ч';
+      queueSave();
+    });
+  });
+
+  const intakeBtns = $('intakeSeg').querySelectorAll('button');
+  intakeBtns.forEach((b, i) => {
+    b.setAttribute('aria-checked', today.intake === INTAKE[i] ? 'true' : 'false');
+    b.addEventListener('click', () => {
+      today.intake = INTAKE[i];
+      intakeBtns.forEach((x, j) => x.setAttribute('aria-checked', j === i ? 'true' : 'false'));
+      queueSave();
+    });
+  });
+  $('intakeV').textContent = dosePhrase();
+
+  const chips = $('chips');
+  activeSides().forEach(name => {
+    const sev0 = today.side[name] || 0;
+    const c = document.createElement('button');
+    c.type = 'button';
+    c.className = 'chip';
+    c.dataset.sev = String(sev0);
+    c.dataset.name = name;
+    c.textContent = chipText(name, sev0);
+    c.setAttribute('aria-label', name + (sev0 ? ': ' + SEV[sev0] : ': нет'));
+    c.addEventListener('click', () => {
+      const sev = (parseInt(c.dataset.sev, 10) + 1) % 4;
+      c.dataset.sev = String(sev);
+      if (sev) today.side[name] = sev; else delete today.side[name];
+      c.textContent = chipText(name, sev);
+      c.setAttribute('aria-label', name + (sev ? ': ' + SEV[sev] : ': нет'));
+      queueSave();
+    });
+    chips.appendChild(c);
+  });
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'chip';
+  more.id = 'moreSide';
+  more.textContent = 'Настроить список…';
+  more.addEventListener('click', () => openSheet(true));
+  chips.appendChild(more);
+
+  const noteBtn = $('noteBtn');
+  noteBtn.textContent = '＋ Добавить заметку';
+  noteBtn.addEventListener('click', () => openNote(today.note));
+  if (today.note) openNote(today.note);
+}
+
+function openNote(value){
+  const btn = $('noteBtn');
+  if (!btn) return;
+  const ta = document.createElement('textarea');
+  ta.placeholder = 'Что было сегодня';
+  ta.setAttribute('aria-label', 'Заметка дня');
+  ta.id = 'noteArea';
+  ta.value = value || '';
+  ta.addEventListener('input', () => { today.note = ta.value; queueSave(); });
+  btn.replaceWith(ta);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ТЕЧЕНИЕ: месячный календарь
+   Клетка красится по средней тяжести дня — все шкалы идут в одну
+   сторону, поэтому среднее читается однозначно. Тап проваливает в день.
+   ═══════════════════════════════════════════════════════════════ */
+function dayLevel(d){
+  const vals = SCALES.map(s => d.scales[s.id]).filter(v => v !== undefined);
+  if (!vals.length) return null;
+  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+}
+
+/* ── график течения ──────────────────────────────────────────────
+   Life chart: от нулевой линии спад идёт вниз, подъём вверх — так
+   устроен NIMH Life Chart Method, и так не нужен отдельный цвет для
+   каждой шкалы. Пропуски остаются пропусками: линия через пустой день
+   была бы выдумкой.                                                  */
+let chartDays = 30;
+
+function chartSvg(span){
+  const n = span || chartDays, L = 6, R = 337;
+  const step = (R - L) / (n - 1);
+  const UP = 14, BASE = 64, DOWN = 134, MISS = 148, SB = 196, SH = 44;
+  const x = i => L + i * step;
+  const yDown = v => BASE + (v / 4) * (DOWN - BASE);
+  const yUp   = v => BASE - (v / 4) * (BASE - UP);
+
+  const list = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const iso = isoShift(isoToday(), -i);
+    list.push({ iso: iso, rec: days.get(iso) || null });
+  }
+
+  function line(key, yfn){
+    let d = '', open = false;
+    list.forEach((p, i) => {
+      const v = p.rec && p.rec.scales ? p.rec.scales[key] : undefined;
+      if (v === undefined || v === null) { open = false; return; }
+      d += (open ? 'L' : 'M') + x(i).toFixed(1) + ' ' + yfn(v).toFixed(1) + ' ';
+      open = true;
+    });
+    return d.trim();
+  }
+
+  const bars = list.map((p, i) => {
+    if (!p.rec || p.rec.sleepH === null || p.rec.sleepH === undefined) return '';
+    const w = Math.max(2, step * 0.6);
+    const hn = (Math.min(12, p.rec.sleepH) / 12) * SH;
+    const hd = (Math.min(12, p.rec.sleepDay || 0) / 12) * SH;
+    return '<rect x="' + (x(i) - w / 2).toFixed(1) + '" y="' + (SB - hn).toFixed(1) +
+           '" width="' + w.toFixed(1) + '" height="' + hn.toFixed(1) +
+           '" fill="var(--sleep)" opacity=".55"/>' +
+      (hd ? '<rect x="' + (x(i) - w / 2).toFixed(1) + '" y="' + (SB - hn - hd).toFixed(1) +
+            '" width="' + w.toFixed(1) + '" height="' + hd.toFixed(1) +
+            '" fill="var(--sleep)" opacity=".3"/>' : '');
+  }).join('');
+
+  const misses = list.map((p, i) => (p.rec && p.rec.intake === 'пропустил')
+    ? '<text x="' + x(i).toFixed(1) + '" y="' + MISS + '" font-size="12" text-anchor="middle" ' +
+      'fill="var(--side)">×</text>' : '').join('');
+
+  // Лента дозы: ступенька держится до следующего назначения.
+  const DTOP = 206, DBOT = 226;
+  const doses = list.map(p => {
+    const r = regimenAt(p.iso);
+    return r && !r.stopped ? (r.doseMg || 0) : 0;
+  });
+  const maxDose = Math.max.apply(null, doses.concat([1]));
+  const hasDose = doses.some(v => v > 0);
+  const hasUp   = list.some(p => p.rec && p.rec.scales && p.rec.scales.up > 0);
+  let doseLine = '', doseLabels = '';
+  if (hasDose) {
+    const dy = v => DBOT - (v / maxDose) * (DBOT - DTOP);
+    list.forEach((p, i) => {
+      const y = dy(doses[i]);
+      if (i === 0) doseLine += 'M' + x(i).toFixed(1) + ' ' + y.toFixed(1);
+      else if (doses[i] !== doses[i - 1])
+        doseLine += ' L' + x(i).toFixed(1) + ' ' + dy(doses[i - 1]).toFixed(1) +
+                    ' L' + x(i).toFixed(1) + ' ' + y.toFixed(1);
+      else doseLine += ' L' + x(i).toFixed(1) + ' ' + y.toFixed(1);
+      if (i === 0 ? doses[0] > 0 : doses[i] !== doses[i - 1]) {
+        doseLabels += '<text x="' + Math.min(x(i) + 3, R - 34).toFixed(1) + '" y="238" ' +
+          'font-size="11" fill="var(--dim)">' +
+          (doses[i] ? doses[i] + ' мг' : 'отмена') + '</text>';
+      }
+    });
+  }
+  const H = hasDose ? 252 : 216;
+
+  let marks = '';
+  const startIso = firstStart();
+  if (startIso) {
+    [0, 2, 4, 8, 14].forEach(w => {
+      const iso = isoShift(startIso, w * 7);
+      const i = list.findIndex(p => p.iso === iso);
+      if (i < 0) return;
+      marks += '<line x1="' + x(i).toFixed(1) + '" y1="' + UP + '" x2="' + x(i).toFixed(1) +
+        '" y2="' + SB + '" stroke="var(--dim)" stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>' +
+        '<text x="' + Math.min(x(i) + 3, R - 30).toFixed(1) + '" y="10" font-size="11" ' +
+        'fill="var(--dim)">' + (w ? w + ' нед' : 'старт') + '</text>';
+    });
+  }
+
+  return '<svg viewBox="0 0 343 ' + H + '" width="100%" height="' + H + '" role="img" ' +
+      'aria-label="Течение за ' + n + ' дней: подъём вверх от нулевой линии, спад вниз, столбики — сон">' +
+    marks +
+    '<line x1="' + L + '" y1="' + BASE + '" x2="' + R + '" y2="' + BASE +
+      '" stroke="var(--border)" stroke-width="1"/>' +
+    // Подъём рисуется, только если он вообще был: иначе линия ложится
+    // ровно на нулевую ось и притворяется данными.
+    (hasUp
+      ? '<path d="' + line('up', yUp) + '" fill="none" stroke="var(--accent)" stroke-width="2" ' +
+        'stroke-linejoin="round" stroke-linecap="round"/>'
+      : '') +
+    // Спад идёт первым, тревога поверх: иначе пунктир пропадает под
+    // толстой линией везде, где значения совпали.
+    '<path d="' + line('low', yDown) + '" fill="none" stroke="var(--accent)" stroke-width="2.5" ' +
+      'stroke-linejoin="round" stroke-linecap="round"/>' +
+    '<path d="' + line('anx', yDown) + '" fill="none" stroke="var(--dim)" stroke-width="1.5" ' +
+      'stroke-dasharray="4 3" stroke-linejoin="round"/>' +
+    bars + misses +
+    (hasDose
+      ? '<path d="' + doseLine + '" fill="none" stroke="var(--dim)" stroke-width="1.5"/>' + doseLabels
+      : '') +
+    '<text x="' + L + '" y="' + (H - 4) + '" font-size="11" fill="var(--dim)">' +
+      human(list[0].iso) + '</text>' +
+    '<text x="' + R + '" y="' + (H - 4) + '" font-size="11" text-anchor="end" ' +
+      'fill="var(--dim)">сегодня</text>' +
+    '</svg>';
+}
+
+// Первая неделя лечения против последней — в цифрах, без вердиктов.
+function weekCompare(){
+  const all = [...days.values()]
+    .filter(d => d.scales.low !== undefined)
+    .sort((a, b) => a.date < b.date ? -1 : 1);
+  const from = meta.startDate ? all.filter(d => d.date >= meta.startDate) : all;
+  if (from.length < 6) {
+    return '<p class="flow-note">Для сравнения первой и последней недели нужно ' +
+      'хотя бы шесть дней со «Спадом»: пока их ' + from.length + '.</p>';
+  }
+  const mean = arr => arr.reduce((s, d) => s + d.scales.low, 0) / arr.length;
+  const a = from.slice(0, 7), b = from.slice(-7);
+  const ma = mean(a), mb = mean(b);
+  const fix = v => v.toFixed(1).replace('.', ',');
+  const diff = ma === 0 ? 0 : Math.round((1 - mb / ma) * 100);
+  return '<p class="flow-note">Спад: <b>' + fix(ma) + '</b> в первые ' + a.length +
+    ' дней с записью против <b>' + fix(mb) + '</b> в последние ' + b.length +
+    ' (' + (diff === 0 ? 'без изменений' : (diff > 0 ? 'ниже на ' + diff + '%' : 'выше на ' + (-diff) + '%')) +
+    '). Это арифметика по вашим записям, а не оценка лечения.</p>';
+}
+
+/* ── раздел «Лекарства» ───────────────────────────────────────── */
+function evLabel(e){
+  const dose = e.doseMg ? ' ' + e.doseMg + ' мг' : '';
+  if (e.type === 'start') return 'начал ' + esc(e.drug) + dose;
+  if (e.type === 'dose')  return 'доза ' + esc(e.drug) + ' → ' + (e.doseMg || '?') + ' мг';
+  return 'отменил ' + esc(e.drug);
+}
+
+function medsBlock(){
+  const list = sortedEvents().reverse();
+  const rows = list.length
+    ? list.map(e =>
+        '<div class="ev">' +
+          '<span class="d">' + human(e.date) + '</span>' +
+          '<span class="t">' + evLabel(e) + '</span>' +
+          '<button type="button" class="chip del" data-del="' + e.id + '" ' +
+            'aria-label="Убрать запись от ' + human(e.date) + '">×</button>' +
+        '</div>').join('')
+    : '<p class="flow-note">Назначений пока нет. Добавьте первое — появится «день N» ' +
+      'в шапке и лента дозы под графиком.</p>';
+  const cur = regimenAt(isoToday());
+  return '<h3 class="meds-h">Лекарства</h3>' + rows +
+    '<button class="btn" type="button" id="evAdd" style="margin-top:var(--s2)">' +
+      '＋ Добавить назначение</button>' +
+    '<div id="evForm" hidden>' +
+      '<div class="seg-wide" role="radiogroup" aria-label="Что произошло" id="evType">' +
+        '<button type="button" role="radio" data-t="start" aria-checked="true">Начал</button>' +
+        '<button type="button" role="radio" data-t="dose" aria-checked="false">Сменил дозу</button>' +
+        '<button type="button" role="radio" data-t="stop" aria-checked="false">Отменил</button>' +
+      '</div>' +
+      '<div class="fields" style="margin-top:var(--s2)">' +
+        '<label>Дата<input type="date" id="evDate" value="' + isoToday() + '"></label>' +
+      '</div>' +
+      '<div class="fields">' +
+        '<label>Препарат<input type="text" id="evDrug" autocomplete="off" placeholder="сертралин" ' +
+          'value="' + esc(cur ? cur.drug : '') + '"></label>' +
+        '<label style="flex:0 0 100px">Доза, мг<input type="number" id="evDose" ' +
+          'inputmode="numeric" min="0" step="5"></label>' +
+      '</div>' +
+      '<button class="btn" type="button" id="evSave">Сохранить</button>' +
+      '<button class="btn quiet" type="button" id="evCancel">Отмена</button>' +
+    '</div>';
+}
+
+function wireMeds(){
+  const form = $('evForm');
+  $('evAdd').addEventListener('click', () => {
+    form.hidden = !form.hidden;
+    if (!form.hidden) $('evDrug').focus();
+  });
+  $('evCancel').addEventListener('click', () => { form.hidden = true; });
+  document.querySelectorAll('#evType button').forEach(b =>
+    b.addEventListener('click', () => {
+      document.querySelectorAll('#evType button').forEach(x =>
+        x.setAttribute('aria-checked', x === b ? 'true' : 'false'));
+      $('evDose').disabled = b.dataset.t === 'stop';
+    }));
+
+  $('evSave').addEventListener('click', async () => {
+    const type = (document.querySelector('#evType button[aria-checked="true"]') || {}).dataset.t;
+    const ev = normalizeEvent({
+      id: newId(),
+      date: $('evDate').value,
+      type: type,
+      drug: $('evDrug').value.trim(),
+      doseMg: $('evDose').value,
+      note: ''
+    });
+    if (!ev) { flash('Проверьте дату и тип события', true); return; }
+    if (type !== 'stop' && !ev.doseMg) { flash('Укажите дозу в мг', true); return; }
+    if (!ev.drug) { flash('Укажите препарат', true); return; }
+    try {
+      await write(EVENTS, ev);
+      events.push(ev);
+      renderFlow();
+      flash('Назначение записано');
+    } catch (e) { flash('Не сохранилось: ' + e.message, true); }
+  });
+
+  // Удаление в два касания: история лечения — не то, что стирают случайно.
+  document.querySelectorAll('[data-del]').forEach(b =>
+    b.addEventListener('click', async () => {
+      if (b.dataset.sure !== '1') {
+        document.querySelectorAll('[data-del]').forEach(x => {
+          x.dataset.sure = '0'; x.textContent = '×';
+        });
+        b.dataset.sure = '1';
+        b.textContent = 'убрать?';
+        return;
+      }
+      try {
+        await del(EVENTS, b.dataset.del);
+        events = events.filter(e => e.id !== b.dataset.del);
+        renderFlow();
+        flash('Запись убрана');
+      } catch (e) { flash('Не удалилось: ' + e.message, true); }
+    }));
+}
+
+function renderFlow(){
+  const now = new Date();
+  const vd = new Date(now.getFullYear(), now.getMonth() + calShift, 1);
+  const year = vd.getFullYear(), month = vd.getMonth();
+  const label = MONTHS_N[vd.getMonth()] + ' ' + vd.getFullYear();
+  const inMonth = new Date(year, month + 1, 0).getDate();
+  const firstCol = (new Date(year, month, 1).getDay() + 6) % 7;   // 0 — понедельник
+  const todayIso = isoToday();
+  const p = n => String(n).padStart(2, '0');
+
+  let cells = '', filled = 0, past = 0;
+  for (let i = 0; i < firstCol; i++) cells += '<div></div>';
+  for (let d = 1; d <= inMonth; d++) {
+    const iso = year + '-' + p(month + 1) + '-' + p(d);
+    const rec = days.get(iso);
+    const lvl = rec ? dayLevel(rec) : null;
+    const has = !!rec && (lvl !== null || rec.intake !== null || !!rec.note || !!rec.sleepTime);
+    const future = iso > todayIso;
+    if (!future) past++;
+    if (has) filled++;
+    // Будущие дни открыты только под план: оценить день, которого не было,
+    // нельзя, а записать «в четверг к врачу» — можно.
+    cells += '<button type="button" class="cal-cell' +
+      (iso === todayIso ? ' today' : '') + (future ? ' future' : '') + '"' +
+      (lvl === null ? '' : ' data-lvl="' + lvl + '"') +
+      ' data-iso="' + iso + '"' +
+      ' aria-label="' + d + ' ' + MONTHS[month] +
+        (future ? (rec && rec.plan ? ', есть план' : ', впереди') : (has ? ', заполнен' : ', пусто')) + '">' +
+      d +
+      (rec && rec.note ? '<span class="dot"></span>' : '') +
+      (rec && rec.plan ? '<span class="plan"></span>' : '') +
+      (rec && rec.backfill ? '<span class="mark">∗</span>' : '') +
+      '</button>';
+  }
+
+  $('main').innerHTML =
+    '<div class="seg-wide" role="radiogroup" aria-label="Окно графика" id="rangeSeg" ' +
+        'style="margin:var(--s1) 0 var(--s2)">' +
+      '<button type="button" role="radio" data-n="30" aria-checked="' + (chartDays === 30) + '">30 дней</button>' +
+      '<button type="button" role="radio" data-n="90" aria-checked="' + (chartDays === 90) + '">90 дней</button>' +
+    '</div>' +
+    chartSvg() +
+    '<div class="legend">' +
+      '<span><i style="background:var(--accent)"></i>спад вниз, подъём вверх</span>' +
+      '<span><i style="background:var(--dim)"></i>тревога</span>' +
+      '<span><i style="background:var(--sleep)"></i>сон</span>' +
+      '<span><i style="background:var(--dim);height:3px;border-radius:2px"></i>доза</span>' +
+      '<span style="color:var(--side)">× пропуск</span>' +
+    '</div>' +
+    weekCompare() +
+    '<div class="cal-head">' +
+      '<button type="button" id="calPrev" aria-label="Предыдущий месяц">‹</button>' +
+      '<span class="m">' + label + '</span>' +
+      '<button type="button" id="calNext" aria-label="Следующий месяц"' +
+        (calShift >= 0 ? ' disabled' : '') + '>›</button>' +
+    '</div>' +
+    '<div class="cal-grid">' +
+      ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x => '<div class="cal-dow">' + x + '</div>').join('') +
+    '</div>' +
+    '<div class="cal-grid" id="calGrid">' + cells + '</div>' +
+    '<div class="legend">' +
+      '<span><i style="background:var(--lvl1)"></i>легче</span>' +
+      '<span><i style="background:var(--lvl4)"></i>тяжелее</span>' +
+      '<span><i style="background:var(--side);border-radius:50%;width:8px;height:8px"></i>заметка</span>' +
+      '<span><i style="background:var(--accent);border-radius:50%;width:8px;height:8px"></i>план</span>' +
+      '<span class="backfill-mark">∗ заполнено позже</span>' +
+    '</div>' +
+    nextPlans() +
+    '<p class="flow-note">Заполнено ' + filled + ' из ' + past + ' прошедших дней месяца. ' +
+      'Нажмите на день, чтобы открыть и дописать его.</p>' +
+    medsBlock() +
+    '<p class="saved" id="saved"></p>';
+
+  document.querySelectorAll('#rangeSeg button').forEach(b =>
+    b.addEventListener('click', () => { chartDays = Number(b.dataset.n); renderFlow(); }));
+  $('calPrev').addEventListener('click', () => { calShift--; renderFlow(); });
+  $('calNext').addEventListener('click', () => { if (calShift < 0) { calShift++; renderFlow(); } });
+  $('calGrid').querySelectorAll('.cal-cell').forEach(c => {
+    c.addEventListener('click', () => openDay(c.dataset.iso));
+  });
+  wireMeds();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ЗАГРУЗКА
+   ═══════════════════════════════════════════════════════════════ */
+// Раньше препарат жил в настройках. Переносим его в события один раз,
+// ничего не удаляя: старые настройки остаются на месте.
+async function migrateMeta(){
+  if (events.length || !meta.drug || !meta.startDate) return;
+  const ev = normalizeEvent({ id:newId(), date:meta.startDate, type:'start',
+                              drug:meta.drug, doseMg:meta.doseMg,
+                              note:'перенесено из настроек' });
+  if (!ev) return;
+  try { await write(EVENTS, ev); events = [ev]; }
+  catch (e) { flash('Назначение не перенеслось: ' + e.message, true); }
+}
+
+async function boot(){
+  status = 'loading';
+  failReason = '';
+  try {
+    db = await openDB();
+    const read = await readDays();
+    const ev = await readEvents();
+    const sc = await readScores();
+    const m = await readMeta();
+    days = new Map(read.list.map(d => [d.date, d]));
+    events = ev.list;
+    scores = sc.list;
+    skipped = read.bad + ev.bad + sc.bad;
+    meta = Object.assign({ drug:'', doseMg:null, startDate:'', lastExport:0,
+                           side:null, pain:false, crisis:'' }, m);
+    status = 'ready';
+  } catch (e) {
+    status = 'failed';
+    failReason = (e && e.message) ? e.message : 'неизвестная причина';
+    today = blankDay(isoToday());
+    renderFailure();
+    renderSheet();
+    return;
+  }
+  await migrateMeta();
+  const iso = isoToday();
+  today = days.has(iso) ? Object.assign({}, days.get(iso)) : inherit(blankDay(iso));
+  view = 'today';
+  calShift = 0;
+  render();
+  renderSheet();
+  if (skipped) flash('Пропущено битых записей: ' + skipped, true);
+}
+
+document.querySelectorAll('nav button').forEach(b => {
+  b.addEventListener('click', () => {
+    if (status !== 'ready') { renderFailure(); return; }
+    view = b.dataset.view;
+    if (view === 'today' && today.date !== isoToday() && !days.has(today.date)) openDay(isoToday());
+    else render();
+  });
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   НАСТРОЙКИ, ЭКСПОРТ, ИМПОРТ
+   ═══════════════════════════════════════════════════════════════ */
+function store(key, val){
+  try {
+    if (val === undefined) return localStorage.getItem(key);
+    localStorage.setItem(key, val);
+  } catch (e) { return null; }
+}
+function applyTheme(t){
+  if (t === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t);
+  document.querySelectorAll('#themeSeg button').forEach(b =>
+    b.setAttribute('aria-checked', b.dataset.t === t ? 'true' : 'false'));
+}
+document.querySelectorAll('#themeSeg button').forEach(b =>
+  b.addEventListener('click', () => { store('mh-theme', b.dataset.t); applyTheme(b.dataset.t); }));
+applyTheme(params.get('theme') || store('mh-theme') || 'auto');
+
+const sheet = $('sheet'), scrim = $('scrim');
+function openSheet(on){ sheet.toggleAttribute('open', on); scrim.toggleAttribute('open', on); }
+$('gear').addEventListener('click', () => openSheet(true));
+$('closeSheet').addEventListener('click', () => openSheet(false));
+scrim.addEventListener('click', () => openSheet(false));
+
+function saveMeta(){
+  if (status !== 'ready') { flash('Данные не читаются — настройка не сохранена', true); return; }
+  write(META, Object.assign({ key:'settings' }, meta)).then(
+    () => { renderHeader(); },
+    e  => flash('Не сохранилось: ' + e.message, true)
+  );
+}
+
+// ── список побочек: что показывать на экране дня ──────────────
+function renderSideEdit(){
+  const host = $('sideEdit');
+  const off = status !== 'ready';
+  host.innerHTML = '';
+  sideList().forEach((s, i) => {
+    const c = document.createElement('button');
+    c.type = 'button';
+    c.className = 'chip';
+    c.textContent = s.n;
+    c.disabled = off;
+    c.setAttribute('aria-pressed', s.on ? 'true' : 'false');
+    c.addEventListener('click', () => {
+      s.on = !s.on;
+      saveMeta(); renderSideEdit();
+      if (view === 'today') render();
+    });
+    host.appendChild(c);
+    if (SIDE_DEFAULT.indexOf(s.n) < 0) {      // свою можно убрать совсем
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'chip del';
+      x.textContent = '×';
+      x.disabled = off;
+      x.setAttribute('aria-label', 'Убрать «' + s.n + '» из списка');
+      x.addEventListener('click', () => {
+        meta.side.splice(i, 1);
+        saveMeta(); renderSideEdit();
+        if (view === 'today') render();
+      });
+      host.appendChild(x);
+    }
+  });
+}
+
+$('addSide').addEventListener('click', () => {
+  const inp = $('newSide');
+  const name = inp.value.trim().slice(0, 40);
+  if (!name) return;
+  if (sideList().some(s => s.n.toLowerCase() === name.toLowerCase())) {
+    flash('Такая побочка уже есть', true);
+    return;
+  }
+  meta.side.push({ n:name, on:true });
+  inp.value = '';
+  saveMeta(); renderSideEdit();
+  if (view === 'today') render();
+});
+
+$('mCrisis').addEventListener('input', e => {
+  meta.crisis = e.target.value.slice(0, 2000);
+  clearTimeout($('mCrisis').t);
+  $('mCrisis').t = setTimeout(saveMeta, 400);
+});
+
+document.querySelectorAll('#painSeg button').forEach(b =>
+  b.addEventListener('click', () => {
+    meta.pain = b.dataset.p === 'yes';
+    saveMeta(); renderSheet();
+    if (view === 'today') render();
+  }));
+
+function exportAgeText(){
+  if (!meta.lastExport) return 'Копию ещё ни разу не скачивали.';
+  const d = Math.round((Date.now() - Number(meta.lastExport)) / 86400000);
+  return d <= 0 ? 'Копия скачана сегодня.' : 'Последняя копия ' + d + ' дн. назад.';
+}
+
+function renderSheet(){
+  const cur = regimenAt(isoToday());
+  $('curDrug').textContent = 'Что принимаю: ' +
+    (cur ? (cur.stopped ? esc(cur.drug) + ' — отменён ' + human(cur.since)
+                        : esc(cur.drug) + (cur.doseMg ? ' ' + cur.doseMg + ' мг' : '') +
+                          ' с ' + human(cur.since))
+         : 'не указано');
+  $('mCrisis').value = meta.crisis || '';
+  $('exportAge').textContent = exportAgeText();
+  $('storeNote').textContent = status === 'ready'
+    ? 'Данные остаются на этом телефоне: ни сервера, ни входа, ни облака. ' +
+      'Записей в журнале: ' + days.size + (skipped ? ', пропущено битых: ' + skipped : '') + '.'
+    : 'Журнал сейчас не читается, поэтому запись и настройки закрыты. ' +
+      'Копию тоже не делаем — в ней было бы пусто.';
+  const off = status !== 'ready';
+  ['exportBtn','importBtn','newSide','addSide','mCrisis'].forEach(id => { $(id).disabled = off; });
+  document.querySelectorAll('#painSeg button').forEach(b =>
+    b.setAttribute('aria-checked', ((b.dataset.p === 'yes') === !!meta.pain) ? 'true' : 'false'));
+  renderSideEdit();
+}
+
+function snapshot(){
+  const list = [...days.values()].sort((a, b) => a.date < b.date ? -1 : 1);
+  if (today && !days.has(today.date)) list.push(today);
+  return { app:'M.H', version:2, exported:new Date().toISOString(),
+           meta:{ drug:meta.drug, doseMg:meta.doseMg, startDate:meta.startDate,
+                  side:meta.side, pain:meta.pain },
+           events: sortedEvents(),
+           scores: scores.slice().sort((a, b) => a.date < b.date ? -1 : 1),
+           days:list };
+}
+
+async function saveCopy(){
+  if (status !== 'ready') { flash('Журнал не читается — копия не делается', true); return; }
+  const text = JSON.stringify(snapshot(), null, 2);
+  const name = 'mh-' + isoToday() + '.json';
+  try {
+    const file = new File([text], name, { type:'application/json' });
+    // На iPhone системный лист «Поделиться» сохраняет в Файлы надёжнее ссылки.
+    if (navigator.canShare && navigator.canShare({ files:[file] })) {
+      await navigator.share({ files:[file], title:name });
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([text], { type:'application/json' }));
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    }
+  } catch (e) { return; }   // владелец закрыл системный лист — это не ошибка
+  meta.lastExport = Date.now();
+  saveMeta();
+  $('exportAge').textContent = exportAgeText();
+  flash('Копия сохранена');
+}
+$('exportBtn').addEventListener('click', saveCopy);
+
+// Импорт в два касания, без системных окон: сначала файл, потом подтверждение.
+let pending = null;
+$('importBtn').addEventListener('click', () => {
+  if (pending) { applyImport(); return; }
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  input.onchange = e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) {
+      const rd = new FileReader();
+      rd.onload = ev => readCopy(String(ev.target.result));
+      rd.onerror = () => flash('Файл не прочитался', true);
+      rd.readAsText(f);
+    }
+    setTimeout(() => input.remove(), 1000);
+  };
+  input.click();
+});
+
+function readCopy(text){
+  let data = null;
+  try { data = JSON.parse(text); } catch (e) { data = null; }
+  if (!data || data.app !== 'M.H' || !Array.isArray(data.days)) {
+    flash('Это не копия M.H', true);
+    return;
+  }
+  const good = [];
+  let bad = 0;
+  for (const raw of data.days) {
+    const d = normalizeDay(raw);
+    if (d) good.push(d); else bad++;
+  }
+  const evGood = [];
+  if (Array.isArray(data.events)) {
+    for (const raw of data.events) {
+      const e = normalizeEvent(raw);
+      if (e) evGood.push(e); else bad++;
+    }
+  }
+  const scGood = [];
+  if (Array.isArray(data.scores)) {
+    for (const raw of data.scores) {
+      const sc = normalizeScore(raw);
+      if (sc) scGood.push(sc); else bad++;
+    }
+  }
+  if (!good.length && !evGood.length && !scGood.length) {
+    flash('В файле нет годных записей', true);
+    return;
+  }
+  pending = { days: good, events: evGood, scores: scGood };
+  const fresh = good.filter(d => !days.has(d.date)).length;
+  $('importBtn').textContent = 'Подтвердить: добавить ' + fresh +
+    ', обновить ' + (good.length - fresh) +
+    (evGood.length ? ', назначений ' + evGood.length : '') +
+    (bad ? ' (битых ' + bad + ')' : '');
+  $('importBtn').classList.add('warn');
+}
+
+async function applyImport(){
+  const list = (pending && pending.days) || [];
+  const evs  = (pending && pending.events) || [];
+  const scs  = (pending && pending.scores) || [];
+  pending = null;
+  $('importBtn').textContent = 'Загрузить копию из файла';
+  $('importBtn').classList.remove('warn');
+  if (status !== 'ready') { flash('Журнал не читается — загрузка закрыта', true); return; }
+  let ok = 0;
+  for (const d of list) {
+    try { await write(DAYS, d); days.set(d.date, d); ok++; }
+    catch (e) { flash('Остановились на ' + d.date + ': ' + e.message, true); break; }
+  }
+  for (const e of evs) {
+    try {
+      await write(EVENTS, e);
+      if (!events.some(x => x.id === e.id)) events.push(e);
+    } catch (err) { flash('Назначения не дозагрузились: ' + err.message, true); break; }
+  }
+  for (const sc of scs) {
+    try {
+      await write(SCORES, sc);
+      if (!scores.some(x => x.id === sc.id)) scores.push(sc);
+    } catch (err) { flash('Опросники не дозагрузились: ' + err.message, true); break; }
+  }
+  const iso = isoToday();
+  today = days.has(iso) ? Object.assign({}, days.get(iso)) : inherit(blankDay(iso));
+  render();
+  renderSheet();
+  flash('Загружено дней: ' + ok);
+}
+
+/* окно для проверок: только чтение состояния */
+window.__mh = {
+  get status(){ return status; },
+  get failReason(){ return failReason; },
+  get day(){ return today; },
+  get count(){ return days.size; },
+  get events(){ return sortedEvents(); },
+  get scores(){ return scores.slice(); },
+  get quiz(){ return quiz; },
+  bandOf: bandOf,
+  defs: SCALE_DEFS,
+  get regimen(){ return regimenAt(isoToday()); },
+  get skipped(){ return skipped; },
+  get meta(){ return meta; },
+  snapshot: snapshot,
+  readCopy: readCopy,
+  applyImport: applyImport,
+  queueSave: queueSave,
+  write: write,
+  boot: boot
+};
+
+boot();
+
+/* Служебный работник — только чтобы приложение открывалось с домашнего
+   экрана без сети. Он не касается IndexedDB: записи владельца живут
+   там, кэш хранит лишь саму страницу и значки.
+
+   На тестовом сервере (порт 8126) не ставим нарочно: кэш между
+   прогонами превратил бы мутационную проверку в фикцию — она гоняла бы
+   старую копию файла и ничего не замечала. */
+if ('serviceWorker' in navigator &&
+    location.protocol !== 'file:' && location.port !== '8126') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {
+      // Не встал — приложение работает как обычная страница.
+      // Офлайна не будет, но терять тут нечего.
+    });
+  });
+}
+</script>
+</body>
+</html>
