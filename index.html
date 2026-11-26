@@ -102,6 +102,8 @@ button:disabled,input:disabled{opacity:.45}
   font-weight:400;letter-spacing:.01em;line-height:1.1;
 }
 .ctx{margin:3px 0 0;font-size:var(--fs-s);color:var(--dim)}
+.ctx.other-day{color:var(--accent);font-weight:600}
+.ctx[hidden]{display:none}
 .gear{margin-left:auto;width:44px;height:44px;display:grid;place-items:center;color:var(--dim)}
 
 .yday{
@@ -391,7 +393,13 @@ nav svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.75;s
   <div class="grab"></div>
   <h2>Настройки</h2>
 
-  <p id="curDrug">Что принимаю: не указано</p>
+  <p>Как называть дневник</p>
+  <div class="fields">
+    <label>Название в шапке<input type="text" id="mTitle" autocomplete="off"
+      maxlength="24" placeholder="Дневник"></label>
+  </div>
+
+  <p style="margin-top:var(--s3)" id="curDrug">Что принимаю: не указано</p>
   <p>Назначения, смены дозы и отмены живут на вкладке «Течение», раздел
      «Лекарства» — там же их видно на ленте под графиком.</p>
 
@@ -456,7 +464,7 @@ let status = 'loading';      // loading | ready | failed
 let failReason = '';
 let days = new Map();        // дата -> запись
 let skipped = 0;             // битые записи, пропущенные при чтении
-let meta = { drug:'', doseMg:null, startDate:'', lastExport:0, side:null, pain:false, crisis:'' };
+let meta = { drug:'', doseMg:null, startDate:'', lastExport:0, side:null, pain:false, crisis:'', title:'' };
 let events = [];             // назначения: старт, смена дозы, отмена
 let scores = [];             // пройденные опросники
 let quiz = null;             // идущее прохождение
@@ -919,29 +927,50 @@ function dosePhrase(iso){
   return r.drug + (r.doseMg ? ' ' + r.doseMg + ' мг' : '');
 }
 
+// Имя дневника. Наверху стоит оно, а не дата: дата меняется каждый день и
+// на трёх вкладках из четырёх к содержимому отношения не имеет, а «препарат
+// не указан» в шапке — укор на пустом месте, его место в «Лекарствах».
+function diaryName(){
+  return (typeof meta.title === 'string' && meta.title.trim()) || 'Дневник';
+}
+
 function renderHeader(){
-  $('dateTitle').textContent = today ? human(today.date) : human(isoToday());
-  let line = dosePhrase(today.date);
-  if (!line) {
-    line = 'препарат не указан — «Течение», раздел «Лекарства»';
-  } else {
-    const start = firstStart();
-    if (start) {
-      const n = daysBetween(start, today.date) + 1;
-      if (n >= 1) line = 'день ' + n + ' · ' + line;
+  $('dateTitle').textContent = diaryName();
+  document.title = diaryName();
+
+  // Вторая строка — что именно сейчас открыто. На «Сегодня» это дата и
+  // режим приёма, на остальных вкладках ничего: там всё подписано само.
+  const ctx = $('ctx');
+  if (view === 'today') {
+    const dose = dosePhrase(today.date);
+    let line = human(today.date);
+    if (dose) {
+      const start = firstStart();
+      const n = start ? daysBetween(start, today.date) + 1 : 0;
+      line += ' · ' + (n >= 1 ? 'день ' + n + ' · ' : '') + dose;
     }
+    ctx.textContent = line;
+    // Чужой день выделяем: запись уйдёт не в сегодня, и это должно быть видно.
+    ctx.classList.toggle('other-day', today.date !== isoToday());
+    ctx.hidden = false;
+  } else {
+    ctx.textContent = '';
+    ctx.classList.remove('other-day');
+    ctx.hidden = true;
   }
-  $('ctx').textContent = line;
 
   const y = $('yday');
   if (view !== 'today') { y.hidden = true; return; }
 
-  // Открыт не сегодняшний день — вместо подсказки про вчера даём дорогу назад.
+  // Открыт не сегодняшний день — вместо подсказки про вчера даём дорогу
+  // назад, и ровно туда, откуда пришли.
   if (today.date !== isoToday()) {
+    const toFlow = dayFrom === 'flow';
     y.hidden = false;
-    y.innerHTML = '<button class="backchip" id="backToday">← Сегодня</button>' +
+    y.innerHTML = '<button class="backchip" id="backToday">← ' +
+      (toFlow ? 'Календарь' : 'Сегодня') + '</button>' +
       (today.backfill ? '<span class="backfill-mark">заполнено позже</span>' : '');
-    $('backToday').addEventListener('click', () => openDay(isoToday()));
+    $('backToday').addEventListener('click', () => closeDay(toFlow ? 'flow' : 'today'));
     return;
   }
 
@@ -956,9 +985,26 @@ function renderHeader(){
 }
 
 // Открыть любой день: он становится редактируемым, как сегодняшний.
-function openDay(iso){
+// Откуда пришли в открытый день: '' — с самой вкладки «Сегодня»,
+// 'flow' — провалились из календаря. Нужно, чтобы кнопка возврата
+// вела назад, а не выбрасывала на начальный экран.
+let dayFrom = '';
+
+function openDay(iso, from){
   today = days.has(iso) ? Object.assign({}, days.get(iso)) : inherit(blankDay(iso));
+  dayFrom = from || '';
   view = 'today';
+  render();
+}
+
+// Уйти из чужого дня. Сегодняшний возвращаем в работу обязательно: иначе
+// вкладка «Сегодня» и шапка остались бы на чужой дате, и запись ушла бы
+// не в тот день.
+function closeDay(to){
+  const iso = isoToday();
+  today = days.has(iso) ? Object.assign({}, days.get(iso)) : inherit(blankDay(iso));
+  dayFrom = '';
+  view = to || 'today';
   render();
 }
 
@@ -1719,6 +1765,18 @@ function wireMeds(){
     }));
 }
 
+// Пустой график в начале ведения ничего не объясняет сам: владелец видит
+// белое поле и не понимает, что там должно быть. Пока записей мало —
+// говорим словами.
+function chartHint(){
+  let n = 0;
+  for (const d of days.values()) if (Object.keys(d.scales).length) n++;
+  if (n >= 4) return '';
+  return '<p class="flow-note">Здесь будет течение: линия вниз — спад, вверх — подъём, ' +
+    'пунктир — тревога, столбики — часы сна, засечки сверху — рубежи 2, 4, 8 и 14 недель ' +
+    'от начала приёма. Рисуется по дням с оценками — пока их ' + n + '.</p>';
+}
+
 function renderFlow(){
   const now = new Date();
   const vd = new Date(now.getFullYear(), now.getMonth() + calShift, 1);
@@ -1755,20 +1813,6 @@ function renderFlow(){
   }
 
   $('main').innerHTML =
-    '<div class="seg-wide" role="radiogroup" aria-label="Окно графика" id="rangeSeg" ' +
-        'style="margin:var(--s1) 0 var(--s2)">' +
-      '<button type="button" role="radio" data-n="30" aria-checked="' + (chartDays === 30) + '">30 дней</button>' +
-      '<button type="button" role="radio" data-n="90" aria-checked="' + (chartDays === 90) + '">90 дней</button>' +
-    '</div>' +
-    chartSvg() +
-    '<div class="legend">' +
-      '<span><i style="background:var(--accent)"></i>спад вниз, подъём вверх</span>' +
-      '<span><i style="background:var(--dim)"></i>тревога</span>' +
-      '<span><i style="background:var(--sleep)"></i>сон</span>' +
-      '<span><i style="background:var(--dim);height:3px;border-radius:2px"></i>доза</span>' +
-      '<span style="color:var(--side)">× пропуск</span>' +
-    '</div>' +
-    weekCompare() +
     '<div class="cal-head">' +
       '<button type="button" id="calPrev" aria-label="Предыдущий месяц">‹</button>' +
       '<span class="m">' + label + '</span>' +
@@ -1789,6 +1833,22 @@ function renderFlow(){
     nextPlans() +
     '<p class="flow-note">Заполнено ' + filled + ' из ' + past + ' прошедших дней месяца. ' +
       'Нажмите на день, чтобы открыть и дописать его.</p>' +
+    '<h2 class="meds-h">График</h2>' +
+    '<div class="seg-wide" role="radiogroup" aria-label="Окно графика" id="rangeSeg" ' +
+        'style="margin:var(--s1) 0 var(--s2)">' +
+      '<button type="button" role="radio" data-n="30" aria-checked="' + (chartDays === 30) + '">30 дней</button>' +
+      '<button type="button" role="radio" data-n="90" aria-checked="' + (chartDays === 90) + '">90 дней</button>' +
+    '</div>' +
+    chartSvg() +
+    chartHint() +
+    '<div class="legend">' +
+      '<span><i style="background:var(--accent)"></i>спад вниз, подъём вверх</span>' +
+      '<span><i style="background:var(--dim)"></i>тревога</span>' +
+      '<span><i style="background:var(--sleep)"></i>сон</span>' +
+      '<span><i style="background:var(--dim);height:3px;border-radius:2px"></i>доза</span>' +
+      '<span style="color:var(--side)">× пропуск</span>' +
+    '</div>' +
+    weekCompare() +
     medsBlock() +
     '<p class="saved" id="saved"></p>';
 
@@ -1797,7 +1857,7 @@ function renderFlow(){
   $('calPrev').addEventListener('click', () => { calShift--; renderFlow(); });
   $('calNext').addEventListener('click', () => { if (calShift < 0) { calShift++; renderFlow(); } });
   $('calGrid').querySelectorAll('.cal-cell').forEach(c => {
-    c.addEventListener('click', () => openDay(c.dataset.iso));
+    c.addEventListener('click', () => openDay(c.dataset.iso, 'flow'));
   });
   wireMeds();
 }
@@ -1854,9 +1914,9 @@ async function boot(){
 document.querySelectorAll('nav button').forEach(b => {
   b.addEventListener('click', () => {
     if (status !== 'ready') { renderFailure(); return; }
-    view = b.dataset.view;
-    if (view === 'today' && today.date !== isoToday() && !days.has(today.date)) openDay(isoToday());
-    else render();
+    // Открыт чужой день — уходя с него по вкладкам, возвращаем сегодняшний.
+    if (today.date !== isoToday()) closeDay(b.dataset.view);
+    else { view = b.dataset.view; render(); }
   });
 });
 
@@ -1942,6 +2002,13 @@ $('addSide').addEventListener('click', () => {
   if (view === 'today') render();
 });
 
+$('mTitle').addEventListener('input', e => {
+  meta.title = e.target.value.slice(0, 24);
+  renderHeader();                       // видно сразу, пока печатает
+  clearTimeout($('mTitle').t);
+  $('mTitle').t = setTimeout(saveMeta, 400);
+});
+
 $('mCrisis').addEventListener('input', e => {
   meta.crisis = e.target.value.slice(0, 2000);
   clearTimeout($('mCrisis').t);
@@ -1968,6 +2035,7 @@ function renderSheet(){
                         : esc(cur.drug) + (cur.doseMg ? ' ' + cur.doseMg + ' мг' : '') +
                           ' с ' + human(cur.since))
          : 'не указано');
+  $('mTitle').value = meta.title || '';
   $('mCrisis').value = meta.crisis || '';
   $('exportAge').textContent = exportAgeText();
   $('storeNote').textContent = status === 'ready'
@@ -1976,7 +2044,7 @@ function renderSheet(){
     : 'Журнал сейчас не читается, поэтому запись и настройки закрыты. ' +
       'Копию тоже не делаем — в ней было бы пусто.';
   const off = status !== 'ready';
-  ['exportBtn','importBtn','newSide','addSide','mCrisis'].forEach(id => { $(id).disabled = off; });
+  ['exportBtn','importBtn','newSide','addSide','mCrisis','mTitle'].forEach(id => { $(id).disabled = off; });
   document.querySelectorAll('#painSeg button').forEach(b =>
     b.setAttribute('aria-checked', ((b.dataset.p === 'yes') === !!meta.pain) ? 'true' : 'false'));
   renderSideEdit();
@@ -1987,7 +2055,7 @@ function snapshot(){
   if (today && !days.has(today.date)) list.push(today);
   return { app:'M.H', version:2, exported:new Date().toISOString(),
            meta:{ drug:meta.drug, doseMg:meta.doseMg, startDate:meta.startDate,
-                  side:meta.side, pain:meta.pain },
+                  side:meta.side, pain:meta.pain, crisis:meta.crisis, title:meta.title },
            events: sortedEvents(),
            scores: scores.slice().sort((a, b) => a.date < b.date ? -1 : 1),
            days:list };
@@ -2084,6 +2152,7 @@ async function applyImport(){
   const list = (pending && pending.days) || [];
   const evs  = (pending && pending.events) || [];
   const scs  = (pending && pending.scores) || [];
+  const mt   = (pending && pending.meta) || null;
   pending = null;
   $('importBtn').textContent = 'Загрузить копию из файла';
   $('importBtn').classList.remove('warn');
@@ -2105,6 +2174,27 @@ async function applyImport(){
       if (!scores.some(x => x.id === sc.id)) scores.push(sc);
     } catch (err) { flash('Опросники не дозагрузились: ' + err.message, true); break; }
   }
+  // Настройки из копии. Без них переезд на другой адрес терял препарат,
+  // список побочек, строку боли, план на тяжёлый случай и название —
+  // день за днём всё на месте, а приложение будто новое.
+  if (mt && typeof mt === 'object') {
+    if (typeof mt.drug === 'string' && mt.drug)        meta.drug = mt.drug.slice(0, 60);
+    if (typeof mt.doseMg === 'number')                 meta.doseMg = mt.doseMg;
+    if (typeof mt.startDate === 'string' &&
+        /^\d{4}-\d{2}-\d{2}$/.test(mt.startDate))      meta.startDate = mt.startDate;
+    if (typeof mt.crisis === 'string' && mt.crisis)    meta.crisis = mt.crisis.slice(0, 2000);
+    if (typeof mt.title === 'string' && mt.title)      meta.title = mt.title.slice(0, 24);
+    if (typeof mt.pain === 'boolean')                  meta.pain = mt.pain;
+    if (Array.isArray(mt.side)) {
+      const clean = mt.side
+        .filter(s => s && typeof s.n === 'string' && s.n)
+        .map(s => ({ n: s.n.slice(0, 40), on: s.on === true }));
+      if (clean.length) meta.side = clean;
+    }
+    try { await write(META, Object.assign({ key:'settings' }, meta)); }
+    catch (e) { flash('Настройки не легли: ' + e.message, true); }
+  }
+
   const iso = isoToday();
   today = days.has(iso) ? Object.assign({}, days.get(iso)) : inherit(blankDay(iso));
   render();
@@ -2130,6 +2220,7 @@ window.__mh = {
   readCopy: readCopy,
   applyImport: applyImport,
   queueSave: queueSave,
+  setPending: v => { pending = v; },
   write: write,
   boot: boot
 };
@@ -2140,17 +2231,24 @@ boot();
    экрана без сети. Он не касается IndexedDB: записи владельца живут
    там, кэш хранит лишь саму страницу и значки.
 
-   На тестовом сервере (порт 8126) не ставим нарочно: кэш между
-   прогонами превратил бы мутационную проверку в фикцию — она гоняла бы
-   старую копию файла и ничего не замечала. */
-if ('serviceWorker' in navigator &&
-    location.protocol !== 'file:' && location.port !== '8126') {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {
-      // Не встал — приложение работает как обычная страница.
-      // Офлайна не будет, но терять тут нечего.
+   На локальном сервере не ставим нарочно и сносим, если остался: кэш
+   отдаёт вчерашний файл и прячет только что сделанную правку — проверка
+   при этом показывает «всё хорошо», а смотрит на старое. Один раз уже
+   поймал на этом себя. Офлайн там и не нужен. */
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  const dev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  if (dev) {
+    navigator.serviceWorker.getRegistrations()
+      .then(rs => rs.forEach(r => r.unregister())).catch(() => {});
+    if (window.caches) caches.keys().then(k => k.forEach(n => caches.delete(n))).catch(() => {});
+  } else {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {
+        // Не встал — приложение работает как обычная страница.
+        // Офлайна не будет, но терять тут нечего.
+      });
     });
-  });
+  }
 }
 </script>
 </body>
