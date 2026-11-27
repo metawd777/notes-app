@@ -116,12 +116,6 @@ button:disabled,input:disabled{opacity:.45}
 
 main{flex:1;overflow-y:auto;padding:0 var(--s3);-webkit-overflow-scrolling:touch}
 
-.row{display:flex;align-items:center;gap:var(--s2);min-height:52px}
-.row + .row{border-top:1px solid var(--line)}
-.lbl{width:92px;flex:none}
-.lbl .n{display:block;font-size:var(--fs-m);font-weight:600;line-height:1.15;letter-spacing:-.01em}
-.lbl .v{display:block;font-size:var(--fs-s);color:var(--dim);line-height:1.25;min-height:14px}
-
 .seg{
   display:flex;flex:1;gap:2px;padding:3px;
   background:var(--track);border:1px solid var(--border);border-radius:var(--r-m);
@@ -132,13 +126,54 @@ main{flex:1;overflow-y:auto;padding:0 var(--s3);-webkit-overflow-scrolling:touch
   transition:background .14s ease,color .14s ease;
 }
 .seg button[aria-checked="true"]{background:var(--accent);color:var(--on-accent);font-weight:600}
+/* Ступень красит заливку: та же шкала, что в клетках календаря, так что
+   экран дня и месяц говорят одним языком. Цвет здесь не единственный
+   носитель смысла — под цифрами стоит слово, а сама цифра остаётся. */
+.seg button[data-v="0"][aria-checked="true"]{background:var(--lvl1);color:var(--on-lvl)}
+.seg button[data-v="1"][aria-checked="true"]{background:var(--lvl2);color:var(--on-lvl)}
+.seg button[data-v="2"][aria-checked="true"]{background:var(--lvl3);color:var(--on-lvl)}
+.seg button[data-v="3"][aria-checked="true"]{background:var(--lvl4);color:var(--on-lvl)}
+.seg button[data-v="4"][aria-checked="true"]{background:var(--accent);color:var(--on-accent)}
 @media (prefers-reduced-motion: reduce){.seg button{transition:none}}
+
+/* ── карточки разделов на экране дня ── */
+.sect{
+  display:flex;align-items:center;gap:var(--s2);width:100%;min-height:56px;
+  padding:var(--s1) 0;border-top:1px solid var(--line);text-align:left;
+}
+.sect .n{flex:0 0 96px;font-size:var(--fs-m);font-weight:600}
+.sect .v{flex:1;font-size:var(--fs-s);color:var(--text);line-height:1.3}
+.sect .v.off{color:var(--dim)}
+.sect .go{flex:none;color:var(--dim);font-size:var(--fs-l);line-height:1}
+
+.subbar{display:flex;align-items:center;gap:var(--s2);padding:var(--s1) 0 var(--s2)}
+.subbar h2{margin:0;font-size:var(--fs-l);font-weight:600}
+
+.daynav{display:flex;gap:var(--s1);padding:var(--s1) 0}
+.daynav button{
+  flex:1;min-height:44px;padding:0 var(--s1);
+  border:1px solid var(--border);border-radius:var(--r-m);background:var(--surface);
+  color:var(--accent);font-size:var(--fs-s);font-weight:600;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.daynav button:disabled{color:var(--dim);opacity:1}
+
+.sc{padding:var(--s2) 0;border-top:1px solid var(--line)}
+.sc:first-child{border-top:0}
+.sc-h{display:flex;align-items:baseline;gap:var(--s1);justify-content:space-between}
+.sc-h .n{font-size:var(--fs-m);font-weight:600}
+.sc-h .v{font-size:var(--fs-s);color:var(--accent);font-weight:600;text-align:right}
+.sc-q{margin:2px 0 var(--s1);font-size:var(--fs-s);color:var(--dim);line-height:1.35}
 
 .block{padding:4px 0;border-top:1px solid var(--line)}
 .cap{display:flex;align-items:baseline;gap:var(--s1);margin-bottom:4px}
 .cap .n{font-size:var(--fs-m);font-weight:600}
 .cap .v{font-size:var(--fs-s);color:var(--dim)}
 
+.ends{
+  display:flex;justify-content:space-between;margin-top:3px;
+  font-size:var(--fs-s);color:var(--dim);
+}
 .more{
   display:block;width:100%;min-height:44px;margin-top:4px;
   border-top:1px solid var(--line);
@@ -265,6 +300,7 @@ textarea{
 .rep-lead{margin:0 0 var(--s2);font-size:var(--fs-s);line-height:1.5}
 .rep-p{margin:0;font-size:var(--fs-s);line-height:1.6;color:var(--dim)}
 .rep-note{margin:var(--s1) 0 0;font-size:11px;color:var(--dim);line-height:1.45}
+.rep-sub{font-size:11px;color:var(--dim);font-weight:400}
 .rep-t{width:100%;border-collapse:collapse;font-size:var(--fs-s)}
 .rep-t th{text-align:left;font-weight:600;color:var(--dim);padding:4px 6px 4px 0;border-bottom:1px solid var(--border)}
 .rep-t td{padding:5px 6px 5px 0;border-bottom:1px solid var(--line);vertical-align:top}
@@ -288,8 +324,8 @@ textarea{
 }
 
 .backchip{
-  min-height:28px;padding:0 var(--s1);border:1px solid var(--border);border-radius:14px;
-  font-size:var(--fs-s);color:var(--text);background:var(--surface);
+  min-height:44px;padding:0 var(--s2);border:1px solid var(--border);border-radius:var(--r-m);
+  font-size:var(--fs-s);color:var(--accent);font-weight:600;background:var(--surface);
 }
 .backfill-mark{color:var(--side);font-weight:600}
 
@@ -465,7 +501,8 @@ let status = 'loading';      // loading | ready | failed
 let failReason = '';
 let days = new Map();        // дата -> запись
 let skipped = 0;             // битые записи, пропущенные при чтении
-let meta = { drug:'', doseMg:null, startDate:'', lastExport:0, side:null, pain:false, crisis:'', title:'' };
+let meta = { drug:'', doseMg:null, startDate:'', lastExport:0, side:null, pain:false,
+             crisis:'', title:'', intakeDefault:true };
 let events = [];             // назначения: старт, смена дозы, отмена
 let scores = [];             // пройденные опросники
 let quiz = null;             // идущее прохождение
@@ -509,13 +546,21 @@ function normalizeDay(raw){
   if (!raw || typeof raw !== 'object') return null;
   if (typeof raw.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date)) return null;
   const n = (v, max) => {
+    // Пусто — это «не отмечено», а не ноль. Number(null) равен нулю, и
+    // день, сохранённый без сна, перечитывался как «спал 0 часов»:
+    // столбик на графике и ноль в среднем по периоду на пустом месте.
+    if (v === null || v === undefined || v === '') return null;
     const x = Number(v);
     return Number.isFinite(x) && x >= 0 && x <= max ? x : null;
   };
   const day = {
     date: raw.date,
     scales: {},
+    // Отметка дня: 0..4, где 2 — «как обычно». Единственная мера, где
+    // середина означает норму, а не отсутствие симптома.
+    dayRate: n(raw.dayRate, 4) === null ? null : Math.round(n(raw.dayRate, 4)),
     sleepTime: typeof raw.sleepTime === 'string' && /^\d{2}:\d{2}$/.test(raw.sleepTime) ? raw.sleepTime : '',
+    wakeTime:  typeof raw.wakeTime  === 'string' && /^\d{2}:\d{2}$/.test(raw.wakeTime)  ? raw.wakeTime  : '',
     sleepH: n(raw.sleepH, 14),
     sleepDay: n(raw.sleepDay, 10) === null ? 0 : n(raw.sleepDay, 10),
     intake: ['принял','пропустил','частично'].indexOf(raw.intake) >= 0 ? raw.intake : null,
@@ -772,20 +817,46 @@ function write(store, value){
 // заметный», «Тревога — сильная», а не «Спад — сильно». Прежние наречия
 // на всех строках подряд звучали как телеграмма.
 const SCALES = [
-  { id:'low',  name:'Спад',  core:true, words:['нет','лёгкий','заметный','сильный','очень сильный'] },
-  { id:'int',  name:'Интерес', core:true, words:['как обычно','чуть меньше','заметно меньше','почти нет','совсем нет'] },
-  { id:'anx',  name:'Тревога', core:true, words:['нет','лёгкая','заметная','сильная','очень сильная'] },
-  { id:'up',   name:'Подъём',  words:['нет','лёгкий','заметный','сильный','очень сильный'] },
-  { id:'blunt',name:'Чувства', words:['как обычно','чуть глуше','заметно глуше','почти нет','совсем нет'] },
+  { id:'low',  name:'Спад', core:true,
+    hint:'Насколько придавлено было настроение',
+    words:['нет, как обычно', 'слегка придавлено', 'заметно тяжело',
+           'тяжело почти весь день', 'невыносимо'] },
+
+  { id:'int',  name:'Интерес', core:true,
+    hint:'Хотелось ли чем-нибудь заниматься — тем, что обычно радует',
+    words:['как обычно', 'чуть меньше обычного', 'заметно меньше',
+           'почти ничего не хотелось', 'не хотелось ничего'] },
+
+  { id:'anx',  name:'Тревога', core:true,
+    hint:'Насколько было тревожно, неспокойно, на взводе',
+    words:['нет', 'лёгкая, не мешала', 'заметная, мешала',
+           'сильная, трудно было терпеть', 'накрывало'] },
+
+  { id:'up',   name:'Подъём',
+    hint:'Не было ли разгона: больше энергии и слов, меньше нужно сна',
+    words:['нет', 'чуть больше сил, чем обычно', 'заметно разогнан',
+           'сильно разогнан', 'не мог остановиться'] },
+
+  { id:'blunt',name:'Чувства',
+    hint:'Не притупились ли чувства — и радость, и горе одинаково',
+    words:['как обычно', 'чуть глуше', 'заметно глуше',
+           'почти ничего не чувствовал', 'не чувствовал ничего'] },
+
   // Все шесть шкал идут в одну сторону: больше — хуже. Иначе график
   // пришлось бы читать в две стороны одновременно.
-  { id:'func', name:'Дела',    words:['как обычно','чуть меньше','заметно меньше','почти ничего','ничего'] },
+  { id:'func', name:'Дела',
+    hint:'Сколько обычных дел удалось сделать — работа, дом, люди',
+    words:['как обычно', 'чуть меньше обычного', 'заметно меньше',
+           'почти ничего', 'совсем ничего'] },
+
   // Необязательная строка: антидепрессанты назначают и при хронической и
   // нейропатической боли (Cochrane PMID 36269595, дулоксетин PMID 19208243,
   // обзор PMID 39449766). Кому назначили из-за боли — для того боль и есть
   // главный исход. Включается в настройках.
   { id:'pain', name:'Боль', core:true, optional:true,
-    words:['нет','слабая','умеренная','сильная','очень сильная'] }
+    hint:'Насколько болело за день в худший момент',
+    words:['нет', 'слабая', 'умеренная, мешала',
+           'сильная', 'очень сильная'] }
 ];
 function visibleScales(){
   return SCALES.filter(s => !s.optional || meta.pain === true);
@@ -796,6 +867,19 @@ function visibleScales(){
 // рядом; боль, если включена, для того человека и есть главный исход.
 // Остальные прячутся за «Ещё», но раскрываются сами, если в открытом дне
 // они уже заполнены: прятать собственные записи нельзя.
+/* Отметка дня — единственная двусторонняя мера в приложении. Шкалы симптомов
+   идут от нуля вверх, и это правильно: «меньше, чем нет тревоги» не бывает.
+   Но тогда улучшение записать нечем — ноль там потолок, а не середина.
+   Здесь середина, и от неё есть ход в обе стороны.
+
+   Почему она живёт отдельно от шкал и не идёт на график к линии «подъёма»:
+   хороший день и подъём настроения — разные вещи. Подъём на графике означает
+   возможную гипоманию, и свалить туда «сегодня было хорошо» значило бы
+   рисовать тревожный признак там, где его нет. */
+const DAY_RATE = ['намного хуже обычного', 'хуже обычного', 'как обычно',
+                  'лучше обычного', 'намного лучше обычного'];
+const DAY_TICK = ['−2', '−1', '0', '+1', '+2'];
+
 function coreScales(){ return visibleScales().filter(s => s.core); }
 function moreScales(){ return visibleScales().filter(s => !s.core); }
 function moreOpen(){
@@ -859,8 +943,13 @@ function daysBetween(a, b){
   return Math.round((Date.UTC(y[0], y[1] - 1, y[2]) - Date.UTC(x[0], x[1] - 1, x[2])) / 86400000);
 }
 
+/* По умолчанию считаем, что приём был: владелец пьёт препарат каждый
+   день, и отмечать это руками 365 раз в год — лишняя работа. Отметка
+   ложится в журнал только вместе с чем-то ещё: день, который не
+   открывали, записи не получает вовсе. Пропуск отмечается руками. */
 function blankDay(date){
-  return { date:date, scales:{}, sleepTime:'', sleepH:null, sleepDay:0, intake:null,
+  return { date:date, scales:{}, dayRate:null, sleepTime:'', wakeTime:'', sleepH:null, sleepDay:0,
+           intake: meta.intakeDefault === false ? null : 'принял',
            side:{}, note:'', plan:'', backfill:false,
            created:new Date().toISOString(), updated:'' };
 }
@@ -874,6 +963,7 @@ function inherit(day){
     .sort((a, b) => a.date < b.date ? 1 : -1)[0];
   if (prev) {
     day.sleepTime = prev.sleepTime;
+    day.wakeTime = prev.wakeTime;
     day.sleepH = prev.sleepH;
     day.inherited = true;
   }
@@ -976,29 +1066,15 @@ function renderHeader(){
     ctx.hidden = true;
   }
 
+  // Строка под шапкой осталась только под пометку «заполнено позже».
+  // Подсказка «Вчера не заполнено 25 ноября →» убрана: стрелка смотрела
+  // вперёд, а уводила назад во времени, и владелец справедливо не понял,
+  // зачем она. Ходить по дням теперь можно явными кнопками на самом
+  // экране дня, а дорога назад — «‹ 26 ноября» и «Календарь» там же.
   const y = $('yday');
-  if (view !== 'today') { y.hidden = true; return; }
-
-  // Открыт не сегодняшний день — вместо подсказки про вчера даём дорогу
-  // назад, и ровно туда, откуда пришли.
-  if (today.date !== isoToday()) {
-    const toFlow = dayFrom === 'flow';
-    y.hidden = false;
-    y.innerHTML = '<button class="backchip" id="backToday">← ' +
-      (toFlow ? 'Календарь' : 'Сегодня') + '</button>' +
-      (today.backfill ? '<span class="backfill-mark">заполнено позже</span>' : '');
-    $('backToday').addEventListener('click', () => closeDay(toFlow ? 'flow' : 'today'));
-    return;
-  }
-
-  const prevIso = isoShift(today.date, -1);
-  const prev = days.get(prevIso);
-  const empty = !prev || (Object.keys(prev.scales).length === 0 && prev.intake === null);
-  y.hidden = !(status === 'ready' && empty);
-  if (!y.hidden) {
-    y.innerHTML = 'Вчера не заполнено <b id="openPrev">' + human(prevIso) + ' →</b>';
-    $('openPrev').addEventListener('click', () => openDay(prevIso));
-  }
+  const mark = view === 'today' && today.date !== isoToday() && today.backfill;
+  y.hidden = !mark;
+  y.innerHTML = mark ? '<span class="backfill-mark">заполнено позже</span>' : '';
 }
 
 // Открыть любой день: он становится редактируемым, как сегодняшний.
@@ -1010,6 +1086,7 @@ let dayFrom = '';
 function openDay(iso, from){
   today = days.has(iso) ? Object.assign({}, days.get(iso)) : inherit(blankDay(iso));
   dayFrom = from || '';
+  sub = '';                              // новый день открывается с титула
   view = 'today';
   render();
 }
@@ -1021,6 +1098,7 @@ function closeDay(to){
   const iso = isoToday();
   today = days.has(iso) ? Object.assign({}, days.get(iso)) : inherit(blankDay(iso));
   dayFrom = '';
+  sub = '';
   view = to || 'today';
   render();
 }
@@ -1031,7 +1109,7 @@ let shownKey = '';
 
 function render(){
   if (status !== 'ready') { renderFailure(); renderSheet(); return; }
-  const key = view + '|' + today.date;
+  const key = view + '|' + today.date + '|' + sub;
   const fresh = key !== shownKey;
   shownKey = key;
   if (view === 'flow') renderFlow();
@@ -1052,7 +1130,10 @@ function render(){
 let reportSpan = 30;        // 30 | 90 | 0 — «с начала приёма»
 
 function hasAnyData(d){
-  return Object.keys(d.scales).length > 0 || d.intake !== null ||
+  // Приём намеренно не в списке: он проставляется по умолчанию, и если
+  // считать его записью, календарь закрасится сам, без единого слова
+  // владельца. Заполненным день делает то, что человек ввёл сам.
+  return Object.keys(d.scales).length > 0 || d.dayRate !== null ||
          !!d.sleepTime || !!d.note;
 }
 
@@ -1085,8 +1166,12 @@ function reportStats(from, to){
     const v = list.map(d => d.scales[sc.id]).filter(x => x !== undefined);
     means[sc.id] = v.length ? { avg: v.reduce((a, b) => a + b, 0) / v.length, n: v.length } : null;
   });
+  const rates = list.map(d => d.dayRate).filter(v => v !== null && v !== undefined);
   return {
     list: list,
+    rate: rates.length
+      ? { avg: rates.reduce((a, b) => a + b, 0) / rates.length - 2, n: rates.length }
+      : null,
     filled: list.filter(hasAnyData).length,
     misses: list.filter(d => d.intake === 'пропустил').map(d => d.date),
     partial: list.filter(d => d.intake === 'частично').length,
@@ -1108,7 +1193,17 @@ function renderReport(){
     ? st.events.map(e => human(e.date) + ' — ' + evLabel(e)).join('<br>')
     : 'назначений не записано';
 
-  const scaleRows = visibleScales().map(sc => {
+  // Отметка дня идёт первой строкой и со знаком: она единственная, где
+  // плюс означает «лучше обычного». Для врача это и есть ответ на вопрос
+  // «стало ли человеку лучше», а не только «меньше ли симптомов».
+  const signed = v => (v > 0 ? '+' : v < 0 ? '−' : '') + fix(Math.abs(v));
+  const rateRow = st.rate
+    ? '<tr><td>День в целом<br><span class="rep-sub">0 — как обычно, ' +
+      '+2 — намного лучше, −2 — намного хуже</span></td><td>' + signed(st.rate.avg) +
+      '</td><td>' + st.rate.n + '</td></tr>'
+    : '<tr><td>День в целом</td><td>—</td><td>0</td></tr>';
+
+  const scaleRows = rateRow + visibleScales().map(sc => {
     const m = st.means[sc.id];
     return '<tr><td>' + sc.name + '</td><td>' + (m ? fix(m.avg) : '—') +
            '</td><td>' + (m ? m.n : 0) + '</td></tr>';
@@ -1229,6 +1324,23 @@ function renderScales(){
   }).join('');
 
   $('main').innerHTML = cards +
+    // Зачем и как часто — спрашивал владелец. Цифры не выдуманы: рубежи
+    // те же, что заложены в расписание, и обоснованы в АНАЛИЗ.md §4.
+    '<div class="card"><div class="cap"><span class="n">Зачем и как часто</span></div>' +
+      '<p class="flow-note" style="margin:0 0 var(--s1)">Шкала даёт одно число, ' +
+        'которое можно сравнить с прошлым разом. Дневник показывает день за днём, ' +
+        'опросник — сдвиг за две недели одной цифрой: её удобно назвать врачу.</p>' +
+      '<p class="flow-note" style="margin:0 0 var(--s1)">Расписание в приложении: ' +
+        'в день назначения, затем на 2, 4, 6 и 8-й неделе, дальше раз в месяц. ' +
+        '<b>Вторая неделя</b> — первая контрольная точка: снижение примерно на ' +
+        'пятую часть к этому сроку обсуждается в метаанализах как предвестник ' +
+        'дальнейшего ответа. <b>4–8 недель</b> — срок, на котором обычно и ' +
+        'обсуждают, менять ли лечение. Дальше реже, но не бросая: ремиссия ' +
+        'приходит и к 14-й неделе.</p>' +
+      '<p class="flow-note" style="margin:0">Пропустили срок — ничего не ломается, ' +
+        'пройдите когда удобно. Важнее сравнимость, чем точность дня: отвечайте ' +
+        'про одни и те же две недели, а не про сегодняшнее настроение.</p>' +
+    '</div>' +
     '<p class="flow-note">Формулировки и варианты ответа — официальный русский перевод ' +
       'с phqscreeners.com. Приложение считает сумму и показывает ступень тяжести ' +
       'из инструкции того же сайта, и ничего не трактует: что делать с баллом, ' +
@@ -1402,118 +1514,277 @@ function hourOptions(max, cur, allowEmpty){
   return out;
 }
 
+/* Экран дня собран разделами. Плоский список из семи строк со шкалами,
+   сном, приёмом и побочками подряд владелец назвал загромождённым, и он
+   прав: за один взгляд там не видно ни что уже заполнено, ни что осталось.
+   Теперь наверху — отметка дня и карточки разделов со сводкой, тап
+   проваливает в раздел, «Назад» возвращает сюда. */
+const SECTIONS = ['state', 'sleep', 'intake', 'side', 'note'];
+const SECT_NAME = { state:'Состояние', sleep:'Сон', intake:'Приём',
+                    side:'Побочки', note:'Заметка' };
+let sub = '';                 // открытый раздел дня, '' — титульный экран
+
+function sumState(){
+  const vis = visibleScales();
+  const got = vis.filter(sc => today.scales[sc.id] !== undefined);
+  if (!got.length) return 'не отмечено';
+  const first = got[0];
+  return first.name.toLowerCase() + ' — ' + first.words[today.scales[first.id]] +
+         ' · ' + got.length + ' из ' + vis.length;
+}
+
+function sumSleep(){
+  const parts = [];
+  if (today.sleepH !== null && today.sleepH !== undefined)
+    parts.push('спал ' + hoursText(today.sleepH));
+  if (today.sleepTime) parts.push('лёг ' + today.sleepTime);
+  if (today.sleepDay) parts.push('днём ' + hoursText(today.sleepDay));
+  return parts.length ? parts.join(' · ') : 'не отмечено';
+}
+
+function sumSide(){
+  const names = Object.keys(today.side || {}).filter(k => today.side[k] > 0);
+  if (!names.length) return 'нет';
+  return names.length + ' — ' + names.slice(0, 2).map(n => n.toLowerCase()).join(', ') +
+         (names.length > 2 ? '…' : '');
+}
+
+function sectionCard(id){
+  const v = { state: sumState(), sleep: sumSleep(),
+              intake: today.intake || 'не отмечено', side: sumSide(),
+              note: today.note ? today.note.slice(0, 40) + (today.note.length > 40 ? '…' : '') : 'нет'
+            }[id];
+  const empty = ['не отмечено', 'нет'].indexOf(v) >= 0;
+  return '<button type="button" class="sect" data-sub="' + id + '">' +
+    '<span class="n">' + SECT_NAME[id] + '</span>' +
+    '<span class="v' + (empty ? ' off' : '') + '">' + esc(v) + '</span>' +
+    '<span class="go" aria-hidden="true">›</span></button>';
+}
+
+/* Перемещение по дням. Было: подсказка «Вчера не заполнено 25 ноября →»
+   в правом верхнем углу — стрелка вперёд, а уводит назад во времени.
+   Стало: явные «предыдущий день» и «следующий день» плюс календарь.
+   Вперёд дальше сегодняшнего дня отсюда не ходим: будущее заполняется
+   планами из календаря, а не оценками. */
+function dayNav(){
+  const prev = isoShift(today.date, -1);
+  const next = isoShift(today.date, 1);
+  const canNext = next <= isoToday();
+  return '<div class="daynav">' +
+    '<button type="button" id="dayPrev" aria-label="Предыдущий день, ' + human(prev) + '">' +
+      '‹ ' + human(prev) + '</button>' +
+    '<button type="button" id="dayCal" aria-label="Открыть календарь">Календарь</button>' +
+    '<button type="button" id="dayNext"' + (canNext ? '' : ' disabled') +
+      ' aria-label="Следующий день">' +
+      (canNext ? human(next) + ' ›' : 'сегодня') + '</button>' +
+    '</div>';
+}
+
+function wireDayNav(){
+  $('dayPrev').addEventListener('click', () => openDay(isoShift(today.date, -1), dayFrom));
+  $('dayCal').addEventListener('click', () => closeDay('flow'));
+  const n = $('dayNext');
+  if (!n.disabled) n.addEventListener('click', () => openDay(isoShift(today.date, 1), dayFrom));
+}
+
 function renderDay(){
+  if (sub) { renderSub(); return; }
   $('main').innerHTML =
+    dayNav() +
     (today.plan ? '<div class="planline"><b>На сегодня</b>' + esc(today.plan) + '</div>' : '') +
-    '<div id="scales"></div>' +
-    '<div class="block">' +
-      '<div class="cap"><span class="n">Сон</span><span class="v" id="sleepV"></span></div>' +
-      '<div class="fields">' +
-        '<label>Лёг<input type="time" id="sleepTime"></label>' +
-        '<label>Спал<select id="hrs">' + hourOptions(14, today.sleepH, true) + '</select></label>' +
-      '</div>' +
-      '<div class="fields" style="margin-bottom:4px">' +
-        '<label>Днём<select id="hrsDay">' + hourOptions(6, today.sleepDay || 0, false) + '</select></label>' +
-        '<span aria-hidden="true" style="flex:1"></span>' +
-      '</div>' +
+    '<div class="block" style="border-top:0;padding-top:0">' +
+      '<div class="cap"><span class="n">День в целом</span>' +
+        '<span class="v" id="rateV"></span></div>' +
+      '<div class="seg" role="radiogroup" aria-label="День в целом" id="rateSeg"></div>' +
+      '<div class="ends"><span>хуже обычного</span><span>лучше обычного</span></div>' +
     '</div>' +
-    '<div class="block">' +
-      '<div class="cap"><span class="n">Приём</span><span class="v" id="intakeV"></span></div>' +
-      '<div class="seg-wide" role="radiogroup" aria-label="Приём препарата" id="intakeSeg">' +
-        '<button type="button" role="radio" aria-checked="false">Принял</button>' +
-        '<button type="button" role="radio" aria-checked="false">Пропустил</button>' +
-        '<button type="button" role="radio" aria-checked="false">Частично</button>' +
-      '</div>' +
-    '</div>' +
-    '<div class="block">' +
-      '<div class="cap"><span class="n">Побочки</span><span class="v">нажать — слабо, ещё раз — сильнее</span></div>' +
-      '<div class="chips" id="chips"></div>' +
-    '</div>' +
-    '<button class="note" type="button" id="noteBtn"></button>' +
+    SECTIONS.map(sectionCard).join('') +
     '<p class="saved" id="saved"></p>';
 
-  const host = $('scales');
-  const open = moreOpen();
-  const extra = moreScales();
-  const shown = open ? visibleScales() : coreScales();
-  shown.forEach(sc => {
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.innerHTML =
-      '<div class="lbl"><span class="n">' + sc.name + '</span>' +
-      '<span class="v" id="v-' + sc.id + '"></span></div>' +
-      '<div class="seg" role="radiogroup" aria-label="' + sc.name + '"></div>';
-    const seg = row.querySelector('.seg');
+  wireDayNav();
+  wireRate();
+  document.querySelectorAll('[data-sub]').forEach(b =>
+    b.addEventListener('click', () => { sub = b.dataset.sub; renderDay(); }));
+}
+
+function wireRate(){
+  const rate = $('rateSeg');
+  for (let i = 0; i < 5; i++) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', today.dayRate === i ? 'true' : 'false');
+    b.setAttribute('aria-label', 'День ' + DAY_RATE[i]);
+    b.textContent = DAY_TICK[i];
+    // Повторное касание снимает отметку: поставить было можно, а убрать —
+    // нет, и ошибочная оценка оставалась в журнале навсегда.
+    b.addEventListener('click', () => {
+      const off = today.dayRate === i;
+      today.dayRate = off ? null : i;
+      rate.querySelectorAll('button').forEach((x, j) =>
+        x.setAttribute('aria-checked', (!off && j === i) ? 'true' : 'false'));
+      $('rateV').textContent = off ? '—' : DAY_RATE[i];
+      queueSave();
+    });
+    rate.appendChild(b);
+  }
+  $('rateV').textContent = today.dayRate === null || today.dayRate === undefined
+    ? '—' : DAY_RATE[today.dayRate];
+}
+
+function renderSub(){
+  const body = { state: subState, sleep: subSleep, intake: subIntake,
+                 side: subSide, note: subNote }[sub];
+  $('main').innerHTML =
+    '<div class="subbar"><button type="button" class="backchip" id="subBack">‹ ' +
+      human(today.date) + '</button><h2>' + SECT_NAME[sub] + '</h2></div>' +
+    body() + '<p class="saved" id="saved"></p>';
+  $('subBack').addEventListener('click', () => { sub = ''; renderDay(); });
+  ({ state: wireState, sleep: wireSleep, intake: wireIntake,
+     side: wireSide, note: wireNote })[sub]();
+}
+
+/* ── раздел «Состояние» ──────────────────────────────────────────
+   Каждая шкала подписана вопросом, на который отвечает: по одному
+   названию «Подъём» или «Чувства» понять, что именно спрашивают и что
+   значит цифра, нельзя. */
+function subState(){
+  return visibleScales().map(sc =>
+    '<div class="sc">' +
+      '<div class="sc-h"><span class="n">' + sc.name + '</span>' +
+        '<span class="v" id="v-' + sc.id + '"></span></div>' +
+      '<p class="sc-q">' + sc.hint + '</p>' +
+      '<div class="seg" role="radiogroup" aria-label="' + sc.name + '" data-sc="' + sc.id + '"></div>' +
+    '</div>').join('');
+}
+
+function wireState(){
+  visibleScales().forEach(sc => {
+    const seg = document.querySelector('.seg[data-sc="' + sc.id + '"]');
     const cur = today.scales[sc.id];
-    for (let i = 0; i < 5; i++){
+    for (let i = 0; i < 5; i++) {
       const b = document.createElement('button');
       b.type = 'button';
       b.setAttribute('role', 'radio');
       b.setAttribute('aria-checked', cur === i ? 'true' : 'false');
       b.setAttribute('aria-label', sc.name + ': ' + sc.words[i]);
+      b.dataset.v = String(i);          // ступень красит заливку
       b.textContent = String(i);
       b.addEventListener('click', () => {
-        today.scales[sc.id] = i;
+        const off = today.scales[sc.id] === i;
+        if (off) delete today.scales[sc.id]; else today.scales[sc.id] = i;
         seg.querySelectorAll('button').forEach((x, j) =>
-          x.setAttribute('aria-checked', j === i ? 'true' : 'false'));
-        $('v-' + sc.id).textContent = sc.words[i];
+          x.setAttribute('aria-checked', (!off && j === i) ? 'true' : 'false'));
+        $('v-' + sc.id).textContent = off ? '—' : sc.words[i];
         queueSave();
       });
       seg.appendChild(b);
     }
-    host.appendChild(row);
     $('v-' + sc.id).textContent = cur === undefined ? '—' : sc.words[cur];
   });
+}
 
-  if (extra.length) {
-    const t = document.createElement('button');
-    t.type = 'button';
-    t.className = 'more';
-    t.id = 'moreBtn';
-    t.setAttribute('aria-expanded', open ? 'true' : 'false');
-    t.textContent = open
-      ? 'Свернуть ещё ' + extra.length
-      : 'Ещё ' + extra.length + ' · ' + extra.map(s => s.name.toLowerCase()).join(', ');
-    t.addEventListener('click', () => {
-      meta.moreOpen = !open;
-      saveMeta();
-      renderDay();
-    });
-    host.appendChild(t);
-  }
+/* ── раздел «Сон» ────────────────────────────────────────────────
+   «Лёг» без «встал» ничего не считал — владелец спросил, зачем он тогда
+   нужен. Теперь из двух времён приложение само считает время в постели
+   и подставляет его в часы сна. Названо честно: сколько из времени в
+   постели вы спали, без браслета не знает никто, поэтому часы остаются
+   отдельным полем и правятся руками. */
+function bedHours(a, b){
+  if (!a || !b) return null;
+  const m = t => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  let d = m(b) - m(a);
+  if (d <= 0) d += 24 * 60;             // лёг вечером, встал утром
+  return Math.round(d / 15) / 4;
+}
 
+function subSleep(){
+  return '<div class="fields">' +
+      '<label>Лёг<input type="time" id="sleepTime"></label>' +
+      '<label>Встал<input type="time" id="wakeTime"></label>' +
+    '</div>' +
+    '<p class="sc-q" id="bedV"></p>' +
+    '<div class="fields">' +
+      '<label>Спал<select id="hrs">' + hourOptions(14, today.sleepH, true) + '</select></label>' +
+      '<label>Днём<select id="hrsDay">' + hourOptions(6, today.sleepDay || 0, false) + '</select></label>' +
+    '</div>' +
+    '<p class="sc-q">Время в постели считается само и подставляется в «Спал». ' +
+      'Если спали меньше, чем лежали, — поправьте: сколько из этого вы ' +
+      'проспали, приложение знать не может.</p>';
+}
+
+function wireSleep(){
+  const show = () => {
+    const b = bedHours(today.sleepTime, today.wakeTime);
+    const mark = today.inherited ? ' · время как вчера' : '';
+    $('bedV').textContent = (b === null
+      ? 'Поставьте оба времени — посчитаю, сколько вы были в постели.'
+      : 'В постели ' + hoursText(b)) + mark;
+  };
   $('sleepTime').value = today.sleepTime || '';
-  $('sleepV').textContent = today.inherited ? 'как вчера' : '';
-  $('sleepTime').addEventListener('change', e => {
-    today.sleepTime = e.target.value;
+  $('wakeTime').value = today.wakeTime || '';
+  show();
+  const onTime = () => {
+    today.sleepTime = $('sleepTime').value;
+    today.wakeTime = $('wakeTime').value;
     today.inherited = false;
-    $('sleepV').textContent = '';
+    const b = bedHours(today.sleepTime, today.wakeTime);
+    // Часы сна подставляются из времени в постели, пока их не правили
+    // руками: иначе поле стояло бы пустым при заполненных временах.
+    if (b !== null && !today.sleepEdited) {
+      today.sleepH = b;
+      $('hrs').value = String(b);
+    }
+    show();
     queueSave();
-  });
+  };
+  $('sleepTime').addEventListener('change', onTime);
+  $('wakeTime').addEventListener('change', onTime);
   $('hrs').addEventListener('change', e => {
     today.sleepH = e.target.value === '' ? null : parseFloat(e.target.value);
+    today.sleepEdited = true;
     today.inherited = false;
-    $('sleepV').textContent = '';
+    show();
     queueSave();
   });
-
   // Дневной сон не наследуется: это событие дня, а не привычка.
   $('hrsDay').addEventListener('change', e => {
     today.sleepDay = parseFloat(e.target.value) || 0;
     queueSave();
   });
+}
 
-  const intakeBtns = $('intakeSeg').querySelectorAll('button');
-  intakeBtns.forEach((b, i) => {
+/* ── раздел «Приём» ──────────────────────────────────────────── */
+function subIntake(){
+  return '<div class="seg-wide" role="radiogroup" aria-label="Приём препарата" id="intakeSeg">' +
+      '<button type="button" role="radio" aria-checked="false">Принял</button>' +
+      '<button type="button" role="radio" aria-checked="false">Пропустил</button>' +
+      '<button type="button" role="radio" aria-checked="false">Частично</button>' +
+    '</div>' +
+    '<p class="sc-q" id="intakeV"></p>';
+}
+
+function wireIntake(){
+  const btns = $('intakeSeg').querySelectorAll('button');
+  btns.forEach((b, i) => {
     b.setAttribute('aria-checked', today.intake === INTAKE[i] ? 'true' : 'false');
     b.addEventListener('click', () => {
-      today.intake = INTAKE[i];
-      intakeBtns.forEach((x, j) => x.setAttribute('aria-checked', j === i ? 'true' : 'false'));
+      const off = today.intake === INTAKE[i];
+      today.intake = off ? null : INTAKE[i];
+      btns.forEach((x, j) => x.setAttribute('aria-checked', (!off && j === i) ? 'true' : 'false'));
       queueSave();
     });
   });
   $('intakeV').textContent = dosePhrase();
+}
 
+/* ── раздел «Побочки» ────────────────────────────────────────── */
+function subSide(){
+  return '<p class="sc-q">Нажать — слабо, ещё раз — сильнее, ещё — снять.</p>' +
+    '<div class="chips wrap" id="chips"></div>';
+}
+
+function wireSide(){
   const chips = $('chips');
   activeSides().forEach(name => {
     const sev0 = today.side[name] || 0;
@@ -1541,23 +1812,18 @@ function renderDay(){
   more.textContent = 'Настроить список…';
   more.addEventListener('click', () => openSheet(true));
   chips.appendChild(more);
-
-  const noteBtn = $('noteBtn');
-  noteBtn.textContent = '＋ Добавить заметку';
-  noteBtn.addEventListener('click', () => openNote(today.note));
-  if (today.note) openNote(today.note);
 }
 
-function openNote(value){
-  const btn = $('noteBtn');
-  if (!btn) return;
-  const ta = document.createElement('textarea');
-  ta.placeholder = 'Что было сегодня';
-  ta.setAttribute('aria-label', 'Заметка дня');
-  ta.id = 'noteArea';
-  ta.value = value || '';
+/* ── раздел «Заметка» ────────────────────────────────────────── */
+function subNote(){
+  return '<textarea id="noteArea" aria-label="Заметка дня" ' +
+    'placeholder="Что было сегодня"></textarea>';
+}
+
+function wireNote(){
+  const ta = $('noteArea');
+  ta.value = today.note || '';
   ta.addEventListener('input', () => { today.note = ta.value; queueSave(); });
-  btn.replaceWith(ta);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1708,7 +1974,30 @@ function weekCompare(){
   return '<p class="flow-note">Спад: <b>' + fix(ma) + '</b> в первые ' + a.length +
     ' дней с записью против <b>' + fix(mb) + '</b> в последние ' + b.length +
     ' (' + (diff === 0 ? 'без изменений' : (diff > 0 ? 'ниже на ' + diff + '%' : 'выше на ' + (-diff) + '%')) +
-    '). Это арифметика по вашим записям, а не оценка лечения.</p>';
+    '). Это арифметика по вашим записям, а не оценка лечения.</p>' +
+    rateCompare();
+}
+
+/* Та же арифметика для отметки дня. Она здесь и нужна: по шкалам симптомов
+   видно только, насколько стало меньше плохого, а «стало лучше обычного»
+   читается лишь отсюда. */
+function rateCompare(){
+  const all = [...days.values()]
+    .filter(d => d.dayRate !== null && d.dayRate !== undefined)
+    .sort((a, b) => a.date < b.date ? -1 : 1);
+  const from = meta.startDate ? all.filter(d => d.date >= meta.startDate) : all;
+  if (from.length < 6) {
+    return '<p class="flow-note">Дней с отметкой «День в целом» пока ' + from.length +
+      '. С шести их можно будет сравнить между собой.</p>';
+  }
+  const mean = arr => arr.reduce((s, d) => s + d.dayRate, 0) / arr.length - 2;
+  const a = from.slice(0, 7), b = from.slice(-7);
+  const fix = v => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(1).replace('.', ',');
+  const ma = mean(a), mb = mean(b), d = mb - ma;
+  return '<p class="flow-note">День в целом: <b>' + fix(ma) + '</b> в первые ' + a.length +
+    ' дней с отметкой против <b>' + fix(mb) + '</b> в последние ' + b.length +
+    ' (0 — как обычно, ' + (Math.abs(d) < 0.05 ? 'без изменений'
+      : (d > 0 ? 'лучше на ' + fix(d) : 'хуже на ' + fix(-d).replace('−', ''))) + ').</p>';
 }
 
 /* ── раздел «Лекарства» ───────────────────────────────────────── */
@@ -1838,7 +2127,9 @@ function renderFlow(){
     const iso = year + '-' + p(month + 1) + '-' + p(d);
     const rec = days.get(iso);
     const lvl = rec ? dayLevel(rec) : null;
-    const has = !!rec && (lvl !== null || rec.intake !== null || !!rec.note || !!rec.sleepTime);
+    // Одно определение заполненности на календарь и на отчёт: иначе
+    // счётчики под ними расходятся, и непонятно, какому верить.
+    const has = !!rec && hasAnyData(rec);
     const future = iso > todayIso;
     if (!future) past++;
     if (has) filled++;
@@ -1962,7 +2253,7 @@ document.querySelectorAll('nav button').forEach(b => {
     if (status !== 'ready') { renderFailure(); return; }
     // Открыт чужой день — уходя с него по вкладкам, возвращаем сегодняшний.
     if (today.date !== isoToday()) closeDay(b.dataset.view);
-    else { view = b.dataset.view; render(); }
+    else { sub = ''; view = b.dataset.view; render(); }
   });
 });
 
@@ -2101,7 +2392,8 @@ function snapshot(){
   if (today && !days.has(today.date)) list.push(today);
   return { app:'M.H', version:2, exported:new Date().toISOString(),
            meta:{ drug:meta.drug, doseMg:meta.doseMg, startDate:meta.startDate,
-                  side:meta.side, pain:meta.pain, crisis:meta.crisis, title:meta.title },
+                  side:meta.side, pain:meta.pain, crisis:meta.crisis, title:meta.title,
+                  intakeDefault:meta.intakeDefault },
            events: sortedEvents(),
            scores: scores.slice().sort((a, b) => a.date < b.date ? -1 : 1),
            days:list };
@@ -2231,6 +2523,7 @@ async function applyImport(){
     if (typeof mt.crisis === 'string' && mt.crisis)    meta.crisis = mt.crisis.slice(0, 2000);
     if (typeof mt.title === 'string' && mt.title)      meta.title = mt.title.slice(0, 24);
     if (typeof mt.pain === 'boolean')                  meta.pain = mt.pain;
+    if (typeof mt.intakeDefault === 'boolean')         meta.intakeDefault = mt.intakeDefault;
     if (Array.isArray(mt.side)) {
       const clean = mt.side
         .filter(s => s && typeof s.n === 'string' && s.n)
@@ -2266,6 +2559,8 @@ window.__mh = {
   readCopy: readCopy,
   applyImport: applyImport,
   queueSave: queueSave,
+  get sub(){ return sub; },
+  openSub: id => { sub = id || ''; render(); },
   setPending: v => { pending = v; },
   write: write,
   boot: boot
