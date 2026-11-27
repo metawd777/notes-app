@@ -146,6 +146,14 @@ main{flex:1;overflow-y:auto;padding:0 var(--s3);-webkit-overflow-scrolling:touch
 .sect .v.off{color:var(--dim)}
 .sect .go{flex:none;color:var(--dim);font-size:var(--fs-l);line-height:1}
 
+.ep{
+  display:flex;align-items:center;gap:var(--s2);width:100%;min-height:48px;
+  padding:var(--s1) 0;border-top:1px solid var(--line);text-align:left;
+}
+.ep .t{flex:0 0 52px;font-size:var(--fs-s);color:var(--accent);font-weight:600}
+.ep .x{flex:1;font-size:var(--fs-m);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ep .go{flex:none;color:var(--dim);font-size:var(--fs-l);line-height:1}
+
 .subbar{display:flex;align-items:center;gap:var(--s2);padding:var(--s1) 0 var(--s2)}
 .subbar h2{margin:0;font-size:var(--fs-l);font-weight:600}
 
@@ -486,11 +494,12 @@ nav svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.75;s
    стоило шести дней данных.
    ═══════════════════════════════════════════════════════════════ */
 const DB_NAME = 'mh-v1';     // НЕ МЕНЯТЬ НИКОГДА
-const DB_VER  = 3;           // 2 — события лекарства, 3 — результаты опросников
+const DB_VER  = 4;           // 2 — события лекарства, 3 — опросники, 4 — эпизоды
 const DAYS = 'days';
 const META = 'meta';
 const EVENTS = 'events';
 const SCORES = 'scores';
+const EPISODES = 'episodes';   // записи внутри дня: время, что было, что чувствовал
 const TIMEOUT = 10000;       // повисшее чтение надо распознавать, а не ждать молча
 
 const params = new URLSearchParams(location.search);
@@ -504,6 +513,7 @@ let skipped = 0;             // битые записи, пропущенные 
 let meta = { drug:'', doseMg:null, startDate:'', lastExport:0, side:null, pain:false,
              crisis:'', title:'', intakeDefault:true };
 let events = [];             // назначения: старт, смена дозы, отмена
+let episodes = [];           // записи внутри дня
 let scores = [];             // пройденные опросники
 let quiz = null;             // идущее прохождение
 let today = null;            // открытый день (не обязательно сегодняшний)
@@ -534,6 +544,7 @@ function openDB(){
       if (!d.objectStoreNames.contains(META))   d.createObjectStore(META,   { keyPath:'key' });
       if (!d.objectStoreNames.contains(EVENTS)) d.createObjectStore(EVENTS, { keyPath:'id' });
       if (!d.objectStoreNames.contains(SCORES)) d.createObjectStore(SCORES, { keyPath:'id' });
+      if (!d.objectStoreNames.contains(EPISODES)) d.createObjectStore(EPISODES, { keyPath:'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror   = () => reject(req.error || new Error('база не открылась'));
@@ -668,6 +679,73 @@ function readEvents(){
     t.onerror    = () => reject(t.error || new Error('чтение событий не удалось'));
     t.onabort    = () => reject(t.error || new Error('чтение событий прервано'));
   }), 'чтения событий');
+}
+
+/* ── эпизоды ─────────────────────────────────────────────────────
+   Запись внутри дня: время, что было, что чувствовал. Нужна потому, что
+   дневная запись отвечает на вопрос «работает ли препарат», а эпизод — на
+   вопрос «что со мной происходит и от чего». Это разные вопросы, и один
+   другого не заменяет, поэтому дневная запись остаётся как была.
+
+   Поля тела, эмоций и ситуации разбираются уже сейчас, хотя в интерфейсе
+   их пока нет: переход базы делается один раз, а не на каждый заход. */
+function normalizeEpisode(raw){
+  if (!raw || typeof raw !== 'object') return null;
+  if (typeof raw.id !== 'string' || !raw.id) return null;
+  if (typeof raw.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date)) return null;
+  const str = (v, max) => typeof v === 'string' ? v.slice(0, max) : '';
+  const ep = {
+    id: raw.id,
+    date: raw.date,
+    time: typeof raw.time === 'string' && /^\d{2}:\d{2}$/.test(raw.time) ? raw.time : '',
+    text: str(raw.text, 4000),
+    situation: str(raw.situation, 4000),
+    unknown: str(raw.unknown, 4000),
+    body: {},
+    emo: [],
+    created: str(raw.created, 40),
+    updated: str(raw.updated, 40)
+  };
+  // Тело: 0–10 на симптом. Ноль — «не отмечено», как и у побочек.
+  if (raw.body && typeof raw.body === 'object') {
+    for (const k of Object.keys(raw.body)) {
+      const v = Number(raw.body[k]);
+      if (Number.isFinite(v) && v > 0 && v <= 10) ep.body[k.slice(0, 40)] = Math.round(v);
+    }
+  }
+  if (Array.isArray(raw.emo)) {
+    ep.emo = raw.emo
+      .filter(e => e && typeof e.n === 'string' && e.n)
+      .slice(0, 30)
+      .map(e => {
+        const v = Number(e.v);
+        return { n: e.n.slice(0, 40), v: Number.isFinite(v) && v >= 0 && v <= 10 ? Math.round(v) : 0 };
+      });
+  }
+  return ep;
+}
+
+function readEpisodes(){
+  return withTimeout(new Promise((resolve, reject) => {
+    const out = [];
+    let bad = 0, t;
+    try { t = db.transaction(EPISODES, 'readonly'); }
+    catch (e) { reject(e); return; }
+    const cur = t.objectStore(EPISODES).openCursor();
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (!c) return;
+      try {
+        const v = normalizeEpisode(c.value);
+        if (v) out.push(v); else bad++;
+      } catch (e) { bad++; }
+      c.continue();
+    };
+    cur.onerror  = () => reject(cur.error || new Error('курсор записей сломался'));
+    t.oncomplete = () => resolve({ list: out, bad: bad });
+    t.onerror    = () => reject(t.error || new Error('чтение записей не удалось'));
+    t.onabort    = () => reject(t.error || new Error('чтение записей прервано'));
+  }), 'чтения записей');
 }
 
 /* ── опросники ──────────────────────────────────────────────────
@@ -1139,12 +1217,27 @@ function render(){
    заполнено: врач должен видеть не только цифры, но и их надёжность. */
 let reportSpan = 30;        // 30 | 90 | 0 — «с начала приёма»
 
+// Записи дня по времени. Без времени — в конец: быстрая пометка могла
+// лечь и без него, терять её нельзя.
+function episodesOf(date){
+  return episodes.filter(e => e.date === date)
+    .sort((a, b) => (a.time || '99:99') < (b.time || '99:99') ? -1 : 1);
+}
+
+function epTitle(e){
+  const t = (e.text || e.situation || '').trim();
+  if (t) return t.split('\n')[0].slice(0, 60);
+  if (e.emo.length) return e.emo.map(x => x.n.toLowerCase()).join(', ').slice(0, 60);
+  if (Object.keys(e.body).length) return Object.keys(e.body).join(', ').toLowerCase().slice(0, 60);
+  return 'пустая запись';
+}
+
 function hasAnyData(d){
   // Приём намеренно не в списке: он проставляется по умолчанию, и если
   // считать его записью, календарь закрасится сам, без единого слова
   // владельца. Заполненным день делает то, что человек ввёл сам.
   return Object.keys(d.scales).length > 0 || d.dayRate !== null ||
-         !!d.sleepTime || !!d.note;
+         !!d.sleepTime || !!d.note || episodesOf(d.date).length > 0;
 }
 
 function reportRange(){
@@ -1182,7 +1275,14 @@ function reportStats(from, to){
     rate: rates.length
       ? { avg: rates.reduce((a, b) => a + b, 0) / rates.length - 2, n: rates.length }
       : null,
-    filled: list.filter(hasAnyData).length,
+    // Считаем дни, а не строки: день из одних записей своей дневной
+    // строки не имеет, но заполненным быть не перестаёт.
+    filled: (() => {
+      const seen = {};
+      list.filter(hasAnyData).forEach(d => { seen[d.date] = 1; });
+      episodes.forEach(e => { if (e.date >= from && e.date <= to) seen[e.date] = 1; });
+      return Object.keys(seen).length;
+    })(),
     misses: list.filter(d => d.intake === 'пропустил').map(d => d.date),
     partial: list.filter(d => d.intake === 'частично').length,
     side: Object.keys(side).map(k => ({ name: k, n: side[k].n, avg: side[k].sum / side[k].n }))
@@ -1548,7 +1648,7 @@ function hourOptions(max, cur, allowEmpty){
    проваливает в раздел, «Назад» возвращает сюда. */
 const SECTIONS = ['state', 'sleep', 'intake', 'side', 'note'];
 const SECT_NAME = { state:'Состояние', sleep:'Сон', intake:'Приём',
-                    side:'Побочки', note:'Заметка' };
+                    side:'Побочки', note:'Заметка', episode:'Запись' };
 let sub = '';                 // открытый раздел дня, '' — титульный экран
 
 // В сводке раздела «Состояние» сначала стояло значение первой шкалы —
@@ -1630,24 +1730,116 @@ function wireDayNav(){
   if (!n.disabled) n.addEventListener('click', () => openDay(isoShift(today.date, 1), dayFrom));
 }
 
+/* Лента записей дня. Врач направил вектор так: единица наблюдения — не
+   только день, но и случай внутри дня. Дневная запись осталась на месте —
+   на ней держатся график, сравнение недель и отчёт, — а записи встали над
+   ней, потому что именно они отвечают на вопрос «что было и от чего».
+
+   Быстрая пометка — одно касание и одно слово: на плохой день человек
+   больше не напишет, а вечером допишет. */
+function epList(){
+  const list = episodesOf(today.date);
+  const rows = list.map(e =>
+    '<button type="button" class="ep" data-ep="' + e.id + '">' +
+      '<span class="t">' + (e.time || '—') + '</span>' +
+      '<span class="x">' + esc(epTitle(e)) + '</span>' +
+      '<span class="go" aria-hidden="true">›</span></button>').join('');
+  return '<div class="block" style="border-top:0;padding-top:0">' +
+      '<div class="cap"><span class="n">Записи</span>' +
+        '<span class="v">' + (list.length ? list.length + ' за день' : 'пока нет') + '</span></div>' +
+      rows +
+      '<button type="button" class="btn" id="epAdd">＋ Запись</button>' +
+    '</div>';
+}
+
 function renderDay(){
   if (sub) { renderSub(); return; }
   $('main').innerHTML =
     dayNav() +
     (today.plan ? '<div class="planline"><b>На сегодня</b>' + esc(today.plan) + '</div>' : '') +
-    '<div class="block" style="border-top:0;padding-top:0">' +
+    epList() +
+    SECTIONS.map(sectionCard).join('') +
+    // Отметка дня стоит последней: она слишком обобщённая, чтобы быть
+    // главной, но единственная, где записывается «лучше обычного».
+    '<div class="block">' +
       '<div class="cap"><span class="n">День в целом</span>' +
         '<span class="v" id="rateV"></span></div>' +
       '<div class="seg" role="radiogroup" aria-label="День в целом" id="rateSeg"></div>' +
       '<div class="ends"><span>хуже обычного</span><span>лучше обычного</span></div>' +
     '</div>' +
-    SECTIONS.map(sectionCard).join('') +
     '<p class="saved" id="saved"></p>';
 
   wireDayNav();
   wireRate();
+  $('epAdd').addEventListener('click', () => openEp(null));
+  document.querySelectorAll('[data-ep]').forEach(b =>
+    b.addEventListener('click', () => openEp(b.dataset.ep)));
   document.querySelectorAll('[data-sub]').forEach(b =>
     b.addEventListener('click', () => { sub = b.dataset.sub; renderDay(); }));
+}
+
+let editEp = null;             // id открытой записи, '' — новая
+
+function openEp(id){
+  editEp = id;
+  sub = 'episode';
+  renderDay();
+}
+
+function curEp(){
+  if (editEp) return episodes.find(e => e.id === editEp) || null;
+  return null;
+}
+
+function subEpisode(){
+  const e = curEp();
+  const now = new Date();
+  const p = n => String(n).padStart(2, '0');
+  const time = e ? e.time : p(now.getHours()) + ':' + p(now.getMinutes());
+  return '<div class="fields">' +
+      '<label>Время<input type="time" id="epTime" value="' + time + '"></label>' +
+      '<span aria-hidden="true" style="flex:1"></span>' +
+    '</div>' +
+    '<p class="sc-q">Хватит одного слова. Вечером можно открыть и дописать.</p>' +
+    '<textarea id="epText" aria-label="Что было" placeholder="Что было"></textarea>' +
+    (e ? '<button type="button" class="btn warn" id="epDel" style="margin-top:var(--s2)">' +
+         'Удалить запись</button>' : '');
+}
+
+function wireEpisode(){
+  const ta = $('epText');
+  const e = curEp();
+  ta.value = e ? e.text : '';
+  const save = () => {
+    if (status !== 'ready') { flash('Данные не читаются — запись не сохранена', true); return; }
+    const rec = normalizeEpisode(Object.assign({
+      id: editEp || newId(), date: today.date,
+      created: e ? e.created : new Date().toISOString()
+    }, e || {}, {
+      time: $('epTime').value, text: ta.value, updated: new Date().toISOString()
+    }));
+    if (!rec) return;
+    write(EPISODES, rec).then(() => {
+      const i = episodes.findIndex(x => x.id === rec.id);
+      if (i >= 0) episodes[i] = rec; else episodes.push(rec);
+      editEp = rec.id;
+      flash('Сохранено');
+    }, err => flash('Не сохранилось: ' + err.message, true));
+  };
+  let t;
+  ta.addEventListener('input', () => { clearTimeout(t); t = setTimeout(save, 500); });
+  $('epTime').addEventListener('change', save);
+  if ($('epDel')) {
+    $('epDel').addEventListener('click', () => {
+      const b = $('epDel');
+      if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Точно удалить?'; return; }
+      del(EPISODES, editEp).then(() => {
+        episodes = episodes.filter(x => x.id !== editEp);
+        editEp = null; sub = ''; renderDay();
+      }, err => flash('Не удалилось: ' + err.message, true));
+    });
+  }
+  ta.focus();
 }
 
 function wireRate(){
@@ -1677,14 +1869,14 @@ function wireRate(){
 
 function renderSub(){
   const body = { state: subState, sleep: subSleep, intake: subIntake,
-                 side: subSide, note: subNote }[sub];
+                 side: subSide, note: subNote, episode: subEpisode }[sub];
   $('main').innerHTML =
     '<div class="subbar"><button type="button" class="backchip" id="subBack">‹ ' +
       human(today.date) + '</button><h2>' + SECT_NAME[sub] + '</h2></div>' +
     body() + '<p class="saved" id="saved"></p>';
-  $('subBack').addEventListener('click', () => { sub = ''; renderDay(); });
+  $('subBack').addEventListener('click', () => { sub = ''; editEp = null; renderDay(); });
   ({ state: wireState, sleep: wireSleep, intake: wireIntake,
-     side: wireSide, note: wireNote })[sub]();
+     side: wireSide, note: wireNote, episode: wireEpisode })[sub]();
 }
 
 /* ── раздел «Состояние» ──────────────────────────────────────────
@@ -2172,7 +2364,9 @@ function renderFlow(){
     const lvl = rec ? dayLevel(rec) : null;
     // Одно определение заполненности на календарь и на отчёт: иначе
     // счётчики под ними расходятся, и непонятно, какому верить.
-    const has = !!rec && hasAnyData(rec);
+    // День может состоять из одних записей — дневной строки у него тогда
+    // нет вовсе, и без второй половины условия он считался бы пустым.
+    const has = (!!rec && hasAnyData(rec)) || episodesOf(iso).length > 0;
     const future = iso > todayIso;
     if (!future) past++;
     if (has) filled++;
@@ -2265,13 +2459,16 @@ async function boot(){
     const read = await readDays();
     const ev = await readEvents();
     const sc = await readScores();
+    const ep = await readEpisodes();
     const m = await readMeta();
     days = new Map(read.list.map(d => [d.date, d]));
     events = ev.list;
     scores = sc.list;
-    skipped = read.bad + ev.bad + sc.bad;
+    episodes = ep.list;
+    skipped = read.bad + ev.bad + sc.bad + ep.bad;
     meta = Object.assign({ drug:'', doseMg:null, startDate:'', lastExport:0,
-                           side:null, pain:false, crisis:'' }, m);
+                           side:null, pain:false, crisis:'', title:'',
+                           intakeDefault:true }, m);
     status = 'ready';
   } catch (e) {
     status = 'failed';
@@ -2438,6 +2635,8 @@ function snapshot(){
                   side:meta.side, pain:meta.pain, crisis:meta.crisis, title:meta.title,
                   intakeDefault:meta.intakeDefault },
            events: sortedEvents(),
+           episodes: episodes.slice().sort((a, b) =>
+             (a.date + (a.time || '')) < (b.date + (b.time || '')) ? -1 : 1),
            scores: scores.slice().sort((a, b) => a.date < b.date ? -1 : 1),
            days:list };
 }
@@ -2533,6 +2732,7 @@ async function applyImport(){
   const list = (pending && pending.days) || [];
   const evs  = (pending && pending.events) || [];
   const scs  = (pending && pending.scores) || [];
+  const eps  = (pending && pending.episodes) || [];
   const mt   = (pending && pending.meta) || null;
   pending = null;
   $('importBtn').textContent = 'Загрузить копию из файла';
@@ -2577,6 +2777,13 @@ async function applyImport(){
     catch (e) { flash('Настройки не легли: ' + e.message, true); }
   }
 
+  for (const e of eps) {
+    try {
+      await write(EPISODES, e);
+      if (!episodes.some(x => x.id === e.id)) episodes.push(e);
+    } catch (err) { flash('Записи не дозагрузились: ' + err.message, true); break; }
+  }
+
   const iso = isoToday();
   today = days.has(iso) ? Object.assign({}, days.get(iso)) : inherit(blankDay(iso));
   render();
@@ -2591,6 +2798,9 @@ window.__mh = {
   get day(){ return today; },
   get count(){ return days.size; },
   get events(){ return sortedEvents(); },
+  get episodes(){ return episodes.slice(); },
+  openEp: openEp,
+  del: del,
   get scores(){ return scores.slice(); },
   get quiz(){ return quiz; },
   bandOf: bandOf,
