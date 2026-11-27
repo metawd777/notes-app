@@ -154,6 +154,11 @@ main{flex:1;overflow-y:auto;padding:0 var(--s3);-webkit-overflow-scrolling:touch
 .ep .x{flex:1;font-size:var(--fs-m);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ep .go{flex:none;color:var(--dim);font-size:var(--fs-l);line-height:1}
 
+.emoRow{display:flex;align-items:center;gap:var(--s2);min-height:44px}
+.emoRow .n{flex:0 0 116px;font-size:var(--fs-s);font-weight:600}
+.emoRow .v{flex:0 0 26px;text-align:right;font-size:var(--fs-s);color:var(--accent);font-weight:600}
+.emoRow input[type=range]{flex:1;accent-color:var(--accent);height:44px}
+
 .subbar{display:flex;align-items:center;gap:var(--s2);padding:var(--s1) 0 var(--s2)}
 .subbar h2{margin:0;font-size:var(--fs-l);font-weight:600}
 
@@ -680,6 +685,36 @@ function readEvents(){
     t.onabort    = () => reject(t.error || new Error('чтение событий прервано'));
   }), 'чтения событий');
 }
+
+/* Эмоции с подсказками. Названия без пояснений не работают: «обида» и
+   «стыд» для многих одно и то же, а разница между ними — ровно то, ради
+   чего список и заведён.
+
+   Это не украшение. Способность различать свои эмоции («эмоциональная
+   гранулярность») связана с лучшими исходами, и само частое называние её
+   повышает — тем сильнее, чем больше записей в день (PMID 34393942,
+   Hoemann и соавт., Front Psychol 2021). То есть «злость 6, обида 4»
+   вместо «плохо» может работать, а не только измерять.
+
+   Порядок: сперва тяжёлые, потому что за ними и берутся за дневник, потом
+   светлые — чтобы они не выглядели приписанными в конце из вежливости. */
+const EMOTIONS = [
+  { n:'Грусть',        h:'тяжело и пусто, хочется, чтобы оставили в покое' },
+  { n:'Тревога',       h:'что-то плохое вот-вот случится, тело на взводе' },
+  { n:'Страх',         h:'есть что-то конкретное, чего боишься прямо сейчас' },
+  { n:'Злость',        h:'нарушили границу, хочется ответить' },
+  { n:'Раздражение',   h:'злость вполсилы, цепляет любая мелочь' },
+  { n:'Вина',          h:'я сделал плохо — про поступок' },
+  { n:'Стыд',          h:'я плохой — про себя целиком, а не про поступок' },
+  { n:'Обида',         h:'близкий поступил несправедливо, и больно именно от него' },
+  { n:'Безысходность', h:'ничего не изменить, что ни делай' },
+  { n:'Усталость',     h:'сил нет, и дело не в настроении' },
+  { n:'Пустота',       h:'не чувствую ничего, ни плохого, ни хорошего' },
+  { n:'Спокойствие',   h:'ровно, ничего не давит' },
+  { n:'Нежность',      h:'тепло к кому-то' },
+  { n:'Радость',       h:'хорошо и хочется что-то делать' },
+  { n:'Облегчение',    h:'отпустило то, что давило' }
+];
 
 /* ── эпизоды ─────────────────────────────────────────────────────
    Запись внутри дня: время, что было, что чувствовал. Нужна потому, что
@@ -1225,9 +1260,9 @@ function episodesOf(date){
 }
 
 function epTitle(e){
-  const t = (e.text || e.situation || '').trim();
+  const t = (e.text || e.situation || e.unknown || '').trim();
   if (t) return t.split('\n')[0].slice(0, 60);
-  if (e.emo.length) return e.emo.map(x => x.n.toLowerCase()).join(', ').slice(0, 60);
+  if (e.emo.length) return e.emo.map(x => x.n.toLowerCase() + ' ' + x.v).join(', ').slice(0, 60);
   if (Object.keys(e.body).length) return Object.keys(e.body).join(', ').toLowerCase().slice(0, 60);
   return 'пустая запись';
 }
@@ -1802,7 +1837,23 @@ function subEpisode(){
     '</div>' +
     '<p class="sc-q">Хватит одного слова. Вечером можно открыть и дописать.</p>' +
     '<textarea id="epText" aria-label="Что было" placeholder="Что было"></textarea>' +
-    (e ? '<button type="button" class="btn warn" id="epDel" style="margin-top:var(--s2)">' +
+
+    '<h3 class="meds-h">Что чувствовал</h3>' +
+    '<p class="sc-q">Нажать — выбрать, ещё раз — убрать. У выбранных ' +
+      'появится сила от 1 до 10.</p>' +
+    '<div class="chips wrap" id="emoChips"></div>' +
+    '<div id="emoVals"></div>' +
+    '<button type="button" class="chip" id="emoUnk" style="margin-top:var(--s2)">' +
+      'Не знаю, что это</button>' +
+    '<textarea id="epUnknown" aria-label="Своими словами" ' +
+      'placeholder="Тогда опишите своими словами: где в теле, на что похоже" ' +
+      'hidden></textarea>' +
+
+    '<h3 class="meds-h">Что было перед этим</h3>' +
+    '<textarea id="epSit" aria-label="Ситуация" ' +
+      'placeholder="Одна-две строки: что случилось до"></textarea>' +
+
+    (e ? '<button type="button" class="btn warn" id="epDel" style="margin-top:var(--s3)">' +
          'Удалить запись</button>' : '');
 }
 
@@ -1810,13 +1861,20 @@ function wireEpisode(){
   const ta = $('epText');
   const e = curEp();
   ta.value = e ? e.text : '';
+  // Черновик эмоций держим здесь: пока запись не сохранена, класть их
+  // некуда, а терять выбор между касаниями нельзя.
+  let emo = e ? e.emo.map(x => ({ n:x.n, v:x.v })) : [];
+
   const save = () => {
     if (status !== 'ready') { flash('Данные не читаются — запись не сохранена', true); return; }
+    const was = curEp();
     const rec = normalizeEpisode(Object.assign({
       id: editEp || newId(), date: today.date,
-      created: e ? e.created : new Date().toISOString()
-    }, e || {}, {
-      time: $('epTime').value, text: ta.value, updated: new Date().toISOString()
+      created: was ? was.created : (e ? e.created : new Date().toISOString())
+    }, was || e || {}, {
+      time: $('epTime').value, text: ta.value,
+      situation: $('epSit').value, unknown: $('epUnknown').value,
+      emo: emo, updated: new Date().toISOString()
     }));
     if (!rec) return;
     write(EPISODES, rec).then(() => {
@@ -1826,6 +1884,64 @@ function wireEpisode(){
       flash('Сохранено');
     }, err => flash('Не сохранилось: ' + err.message, true));
   };
+
+  $('epSit').value = e ? e.situation : '';
+  $('epUnknown').value = e ? e.unknown : '';
+  if (e && e.unknown) $('epUnknown').hidden = false;
+
+  const vals = $('emoVals');
+  const chips = $('emoChips');
+
+  // Сила показывается только у выбранных: пятнадцать ползунков на экране —
+  // это то самое «много полей», от которого дневник и бросают.
+  const drawVals = () => {
+    vals.innerHTML = emo.map(x =>
+      '<div class="emoRow"><span class="n">' + esc(x.n) + '</span>' +
+      '<input type="range" min="1" max="10" step="1" value="' + (x.v || 5) + '" ' +
+        'aria-label="Сила: ' + esc(x.n) + '" data-emo="' + esc(x.n) + '">' +
+      '<span class="v">' + (x.v || 5) + '</span></div>').join('');
+    vals.querySelectorAll('input[data-emo]').forEach(r => {
+      r.addEventListener('input', () => {
+        const it = emo.find(x => x.n === r.dataset.emo);
+        if (it) it.v = Number(r.value);
+        r.nextElementSibling.textContent = r.value;
+      });
+      r.addEventListener('change', save);
+    });
+  };
+
+  EMOTIONS.forEach(def => {
+    const c = document.createElement('button');
+    c.type = 'button';
+    c.className = 'chip';
+    c.dataset.emo = def.n;
+    c.textContent = def.n;
+    c.title = def.h;
+    c.setAttribute('aria-label', def.n + ' — ' + def.h);
+    const on = () => emo.some(x => x.n === def.n);
+    c.setAttribute('aria-pressed', on() ? 'true' : 'false');
+    c.addEventListener('click', () => {
+      if (on()) emo = emo.filter(x => x.n !== def.n);
+      else emo.push({ n: def.n, v: 5 });
+      c.setAttribute('aria-pressed', on() ? 'true' : 'false');
+      drawVals();
+      save();
+    });
+    chips.appendChild(c);
+  });
+  drawVals();
+
+  $('emoUnk').addEventListener('click', () => {
+    const t = $('epUnknown');
+    t.hidden = !t.hidden;
+    if (!t.hidden) t.focus();
+  });
+
+  let tu;
+  $('epUnknown').addEventListener('input', () => { clearTimeout(tu); tu = setTimeout(save, 500); });
+  let ts;
+  $('epSit').addEventListener('input', () => { clearTimeout(ts); ts = setTimeout(save, 500); });
+
   let t;
   ta.addEventListener('input', () => { clearTimeout(t); t = setTimeout(save, 500); });
   $('epTime').addEventListener('change', save);
@@ -2131,6 +2247,7 @@ function chartSvg(span){
   const hasDose = doses.some(v => v > 0);
   const hasUp   = list.some(p => p.rec && p.rec.scales && p.rec.scales.up > 0);
   let doseLine = '', doseLabels = '';
+  const marksDose = [];
   if (hasDose) {
     const dy = v => DBOT - (v / maxDose) * (DBOT - DTOP);
     list.forEach((p, i) => {
@@ -2141,13 +2258,24 @@ function chartSvg(span){
                     ' L' + x(i).toFixed(1) + ' ' + y.toFixed(1);
       else doseLine += ' L' + x(i).toFixed(1) + ' ' + y.toFixed(1);
       if (i === 0 ? doses[0] > 0 : doses[i] !== doses[i - 1]) {
-        doseLabels += '<text x="' + Math.min(x(i) + 3, R - 34).toFixed(1) + '" y="238" ' +
-          'font-size="11" fill="var(--dim)">' +
-          (doses[i] ? doses[i] + ' мг' : 'отмена') + '</text>';
+        marksDose.push({ x: Math.min(x(i) + 3, R - 34),
+                         s: doses[i] ? doses[i] + ' мг' : 'отмена' });
       }
     });
+    // Две смены дозы подряд — и подписи налезали друг на друга: «25 мб0 мг».
+    // Не выбрасываем ни одной: смена дозы — то, ради чего лента и нужна.
+    // Ставим в два ряда, вторым идёт та, что не поместилась в первый.
+    const wide = t => t.length * 6 + 4;
+    const rowEnd = [-1e9, -1e9];
+    marksDose.forEach(m => {
+      const row = m.x >= rowEnd[0] ? 0 : (m.x >= rowEnd[1] ? 1 : -1);
+      if (row < 0) return;                 // плотнее уже некуда
+      rowEnd[row] = m.x + wide(m.s);
+      doseLabels += '<text x="' + m.x.toFixed(1) + '" y="' + (236 + row * 11) +
+        '" font-size="11" fill="var(--dim)">' + m.s + '</text>';
+    });
   }
-  const H = hasDose ? 252 : 216;
+  const H = hasDose ? 264 : 216;
 
   let marks = '';
   const startIso = firstStart();
