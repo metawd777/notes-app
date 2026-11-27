@@ -1253,6 +1253,13 @@ function renderReport(){
       '<h3 class="rep-h3">Среднее за период</h3>' +
       '<table class="rep-t"><thead><tr><th>Шкала</th><th>Среднее</th><th>Дней</th></tr></thead>' +
         '<tbody>' + scaleRows + '</tbody></table>' +
+      // Отметка дня стоит первой строкой рядом со шкалами, и без оговорки
+      // её легко принять за инструмент с порогами. Это не инструмент.
+      '<p class="rep-note">«День в целом» — собственная оценка пациента по ' +
+        'пятибалльной шкале от −2 до +2, где 0 — «как обычно». Это не ' +
+        'валидированный опросник: порогов и нормативов у неё нет, читать её ' +
+        'стоит как направление во времени, а не как балл. Остальные строки — ' +
+        'ежедневные самооценки симптомов, 0 — нет симптома, 4 — максимум.</p>' +
 
       '<h3 class="rep-h3">Опросники</h3>' +
       '<table class="rep-t"><thead><tr><th>Дата</th><th>Шкала</th><th>Балл</th><th>Ступень</th></tr></thead>' +
@@ -1544,13 +1551,19 @@ const SECT_NAME = { state:'Состояние', sleep:'Сон', intake:'Приё
                     side:'Побочки', note:'Заметка' };
 let sub = '';                 // открытый раздел дня, '' — титульный экран
 
+// В сводке раздела «Состояние» сначала стояло значение первой шкалы —
+// «спад — заметно тяжело». Владелец назвал это глупым, и справедливо:
+// первая она только по порядку в списке, ничем не главнее прочих, и
+// вытаскивать наружу именно её — произвол. Пока ничего не отмечено, сводка
+// говорит, что внутри; как только отмечено — сколько из скольких.
 function sumState(){
   const vis = visibleScales();
   const got = vis.filter(sc => today.scales[sc.id] !== undefined);
-  if (!got.length) return 'не отмечено';
-  const first = got[0];
-  return first.name.toLowerCase() + ' — ' + first.words[today.scales[first.id]] +
-         ' · ' + got.length + ' из ' + vis.length;
+  if (!got.length) {
+    return vis.slice(0, 3).map(s => s.name.toLowerCase()).join(', ') +
+           (vis.length > 3 ? ' и ещё ' + (vis.length - 3) : '');
+  }
+  return 'отмечено ' + got.length + ' из ' + vis.length;
 }
 
 function sumSleep(){
@@ -1574,7 +1587,17 @@ function sectionCard(id){
               intake: today.intake || 'не отмечено', side: sumSide(),
               note: today.note ? today.note.slice(0, 40) + (today.note.length > 40 ? '…' : '') : 'нет'
             }[id];
-  const empty = ['не отмечено', 'нет'].indexOf(v) >= 0;
+  // Пустоту считаем по самим данным, а не по тексту сводки: сводка
+  // «Состояния» в пустом виде перечисляет шкалы и под «не отмечено» уже
+  // не подходит.
+  const empty = {
+    state: visibleScales().every(sc => today.scales[sc.id] === undefined),
+    sleep: !today.sleepTime && !today.wakeTime &&
+           (today.sleepH === null || today.sleepH === undefined) && !today.sleepDay,
+    intake: today.intake === null,
+    side: !Object.keys(today.side || {}).some(k => today.side[k] > 0),
+    note: !today.note
+  }[id];
   return '<button type="button" class="sect" data-sub="' + id + '">' +
     '<span class="n">' + SECT_NAME[id] + '</span>' +
     '<span class="v' + (empty ? ' off' : '') + '">' + esc(v) + '</span>' +
