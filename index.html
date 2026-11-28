@@ -272,6 +272,12 @@ textarea{
   position:absolute;left:4px;bottom:4px;width:5px;height:5px;
   border-radius:50%;background:var(--accent);
 }
+/* Срок опросника — цветом сна: третья роль уже занята побочками, а
+   четвёртого цвета в системе нет и заводить его ради точки не стоит. */
+.cal-cell .quiz{
+  position:absolute;right:4px;top:4px;width:5px;height:5px;
+  border-radius:50%;background:var(--sleep);
+}
 .planline{
   margin:var(--s1) 0 0;padding:var(--s1) var(--s2);
   border-left:3px solid var(--accent);background:var(--track);
@@ -314,6 +320,16 @@ textarea{
 .rep-p{margin:0;font-size:var(--fs-s);line-height:1.6;color:var(--dim)}
 .rep-note{margin:var(--s1) 0 0;font-size:11px;color:var(--dim);line-height:1.45}
 .rep-sub{font-size:11px;color:var(--dim);font-weight:400}
+.print-only{display:none}
+.rep-q{margin:var(--s1) 0 0;padding-left:20px;font-size:var(--fs-s);line-height:1.6}
+.rep-q .done{text-decoration:line-through;color:var(--dim)}
+.qrow{display:flex;align-items:center;gap:var(--s1);border-top:1px solid var(--line)}
+.qrow .q{
+  flex:1;min-height:48px;text-align:left;font-size:var(--fs-m);line-height:1.3;
+  padding:var(--s1) 0;
+}
+.qrow .q.done{text-decoration:line-through;color:var(--dim)}
+.qrow .chip{min-height:44px;min-width:44px;justify-content:center}
 .rep-t{width:100%;border-collapse:collapse;font-size:var(--fs-s)}
 .rep-t th{text-align:left;font-weight:600;color:var(--dim);padding:4px 6px 4px 0;border-bottom:1px solid var(--border)}
 .rep-t td{padding:5px 6px 5px 0;border-bottom:1px solid var(--line);vertical-align:top}
@@ -330,6 +346,7 @@ textarea{
   html, body{height:auto;overflow:visible;background:#fff}
   body{display:block}
   header.top, nav, .yday, .scrim, .sheet, .no-print{display:none !important}
+  .print-only{display:block !important}
   main{overflow:visible;padding:0;flex:none}
   .report{font-size:10.5pt}
   .rep-t{page-break-inside:avoid}
@@ -698,6 +715,22 @@ function readEvents(){
 
    Порядок: сперва тяжёлые, потому что за ними и берутся за дневник, потом
    светлые — чтобы они не выглядели приписанными в конце из вежливости. */
+/* Симптомы тела в записи. Оценка 0–10: для боли это обычная числовая
+   шкала, и врач читает её без перевода. Дневные шкалы остаются 0–4 — их
+   уже накоплено за месяц, и перевод обесценил бы сравнимость.
+
+   Список — то, что назвал владелец со слов врача, плюс несколько частых
+   рядом. Своё добавляется и запоминается. */
+const BODY_DEFAULT = ['Головная боль', 'Тошнота', 'Вздутие', 'Боль в животе',
+                      'Боль в спине', 'Боль в руке', 'Усталость', 'Зажим',
+                      'Сердцебиение', 'Нехватка воздуха', 'Головокружение',
+                      'Дрожь'];
+
+function bodyList(){
+  const extra = Array.isArray(meta.bodyExtra) ? meta.bodyExtra : [];
+  return BODY_DEFAULT.concat(extra.filter(n => BODY_DEFAULT.indexOf(n) < 0));
+}
+
 const EMOTIONS = [
   { n:'Грусть',        h:'тяжело и пусто, хочется, чтобы оставили в покое' },
   { n:'Тревога',       h:'что-то плохое вот-вот случится, тело на взводе' },
@@ -945,19 +978,19 @@ const SCALES = [
     words:['нет', 'лёгкая, не мешала', 'заметная, мешала',
            'сильная, трудно было терпеть', 'накрывало'] },
 
-  { id:'up',   name:'Подъём',
+  { id:'up',   name:'Подъём', weekly:true,
     hint:'Не было ли разгона: больше энергии и слов, меньше нужно сна',
     words:['нет', 'чуть больше сил, чем обычно', 'заметно разогнан',
            'сильно разогнан', 'не мог остановиться'] },
 
-  { id:'blunt',name:'Чувства',
+  { id:'blunt',name:'Чувства', weekly:true,
     hint:'Не притупились ли чувства — и радость, и горе одинаково',
     words:['как обычно', 'чуть глуше', 'заметно глуше',
            'почти ничего не чувствовал', 'не чувствовал ничего'] },
 
   // Все шесть шкал идут в одну сторону: больше — хуже. Иначе график
   // пришлось бы читать в две стороны одновременно.
-  { id:'func', name:'Дела',
+  { id:'func', name:'Дела', weekly:true,
     hint:'Сколько обычных дел удалось сделать — работа, дом, люди',
     words:['как обычно', 'чуть меньше обычного', 'заметно меньше',
            'почти ничего', 'совсем ничего'] },
@@ -973,6 +1006,29 @@ const SCALES = [
 ];
 function visibleScales(){
   return SCALES.filter(s => !s.optional || meta.pain === true);
+}
+
+/* Ежедневно спрашиваем только ядро: спад и интерес — это PHQ-2, тревога
+   идёт рядом, боль для того, кому препарат назначили из-за неё, и есть
+   главный исход. Подъём, чувства и дела ушли на раз в неделю: каждый день
+   они почти не меняются, а работы требуют столько же. Записывать их реже
+   честнее, чем получить брошенный на третьей неделе дневник. */
+function dailyScales(){ return visibleScales().filter(s => !s.weekly); }
+function weeklyScales(){ return visibleScales().filter(s => s.weekly); }
+
+// Когда недельные шкалы спрашивать снова: через семь дней после того дня,
+// в котором их заполняли последний раз.
+function weeklyLast(){
+  const ids = weeklyScales().map(s => s.id);
+  const got = [...days.values()]
+    .filter(d => ids.some(id => d.scales[id] !== undefined))
+    .sort((a, b) => a.date < b.date ? 1 : -1);
+  return got.length ? got[0].date : '';
+}
+
+function weeklyDue(){
+  const last = weeklyLast();
+  return last ? isoShift(last, 7) : isoToday();
 }
 
 // Экран дня был загромождён: семь строк подряд, и каждая требует решения.
@@ -1160,6 +1216,76 @@ function dosePhrase(iso){
 // Имя дневника. Наверху стоит оно, а не дата: дата меняется каждый день и
 // на трёх вкладках из четырёх к содержимому отношения не имеет, а «препарат
 // не указан» в шапке — укор на пустом месте, его место в «Лекарствах».
+/* Вопросы врачу. Лежат в настройках, а не в отдельном хранилище: их
+   единицы, переход базы ради них делать незачем. Уносятся копией вместе
+   с остальными настройками.
+
+   Зачем вообще: к врачу идут раз в несколько недель, а вопросы приходят
+   в голову между приёмами и к приёму забываются. Это и была просьба. */
+function questions(){
+  return Array.isArray(meta.questions) ? meta.questions : [];
+}
+
+/* Список вопросов на экране «Отчёт». Вычеркнутый остаётся в печати: врач
+   видит и то, что уже спросили, и это бывает важнее несспрошенного. */
+function renderQuestions(){
+  const host = $('qList');
+  if (!host) return;
+  const list = questions();
+  if (!list.length) {
+    host.innerHTML = '<p class="flow-note" style="margin:0">Пока пусто. ' +
+      'Вопрос можно добавить в любой момент — к приёму они забываются.</p>';
+    return;
+  }
+  host.innerHTML = list.map(q =>
+    '<div class="qrow"><button type="button" class="q' + (q.done ? ' done' : '') +
+      '" data-q="' + q.id + '">' + esc(q.t) + '</button>' +
+    '<button type="button" class="chip del" data-qdel="' + q.id + '" ' +
+      'aria-label="Убрать вопрос">×</button></div>').join('');
+
+  host.querySelectorAll('[data-q]').forEach(b =>
+    b.addEventListener('click', () => {
+      meta.questions = questions().map(q =>
+        q.id === b.dataset.q ? Object.assign({}, q, { done: !q.done }) : q);
+      saveMeta();
+      renderQuestions();
+    }));
+  host.querySelectorAll('[data-qdel]').forEach(b =>
+    b.addEventListener('click', () => {
+      meta.questions = questions().filter(q => q.id !== b.dataset.qdel);
+      saveMeta();
+      renderQuestions();
+    }));
+}
+
+function addQuestion(text){
+  const t = String(text || '').trim().slice(0, 300);
+  if (!t) return false;
+  meta.questions = questions().concat([{ id: newId(), t: t, done: false }]);
+  saveMeta();
+  return true;
+}
+
+/* Приложение советует проходить опросники по расписанию, значит обязано
+   показывать когда. Но не раньше, чем человек возьмётся за дневник: если
+   он открыл приложение один раз, напоминание будет укором, а не помощью.
+   Порог владельца: хотя бы два дня записей. */
+function keepsDiary(){
+  let n = 0;
+  for (const d of days.values()) { if (hasAnyData(d)) n++; if (n >= 2) return true; }
+  return false;
+}
+
+// Сроки опросников, которые стоит показать: просроченные и ближайшие две недели.
+function quizDue(){
+  if (!keepsDiary()) return [];
+  const to = isoShift(isoToday(), 14);
+  return ['phq9', 'gad7']
+    .map(k => ({ k: k, name: SCALE_DEFS[k].name, iso: nextDue(k) }))
+    .filter(q => q.iso && q.iso <= to)
+    .sort((a, b) => a.iso < b.iso ? -1 : 1);
+}
+
 function diaryName(){
   return (typeof meta.title === 'string' && meta.title.trim()) || 'Дневник';
 }
@@ -1263,7 +1389,8 @@ function epTitle(e){
   const t = (e.text || e.situation || e.unknown || '').trim();
   if (t) return t.split('\n')[0].slice(0, 60);
   if (e.emo.length) return e.emo.map(x => x.n.toLowerCase() + ' ' + x.v).join(', ').slice(0, 60);
-  if (Object.keys(e.body).length) return Object.keys(e.body).join(', ').toLowerCase().slice(0, 60);
+  if (Object.keys(e.body).length)
+    return Object.keys(e.body).map(n => n.toLowerCase() + ' ' + e.body[n]).join(', ').slice(0, 60);
   return 'пустая запись';
 }
 
@@ -1304,9 +1431,34 @@ function reportStats(from, to){
     const v = list.map(d => d.scales[sc.id]).filter(x => x !== undefined);
     means[sc.id] = v.length ? { avg: v.reduce((a, b) => a + b, 0) / v.length, n: v.length } : null;
   });
+  // Записи периода и то, что из них складывается. Это и есть то, ради чего
+  // всё затевалось: врачу нужны не только средние по шкалам, но и что
+  // человек чувствовал и в каком теле.
+  const eps = episodes.filter(e => e.date >= from && e.date <= to)
+    .sort((a, b) => (a.date + (a.time || '')) < (b.date + (b.time || '')) ? -1 : 1);
+
+  const tally = pairs => {
+    const acc = {};
+    pairs.forEach(pair => {
+      const n = pair[0], v = pair[1];
+      if (!acc[n]) acc[n] = { count: 0, sum: 0 };
+      acc[n].count++; acc[n].sum += v;
+    });
+    return Object.keys(acc)
+      .map(k => ({ name: k, n: acc[k].count, avg: acc[k].sum / acc[k].count }))
+      .sort((a, b) => b.n - a.n || b.avg - a.avg).slice(0, 5);
+  };
+
+  const emoTop = tally([].concat.apply([], eps.map(e => e.emo.map(x => [x.n, x.v]))));
+  const bodyTop = tally([].concat.apply([], eps.map(e =>
+    Object.keys(e.body).map(k => [k, e.body[k]]))));
+
   const rates = list.map(d => d.dayRate).filter(v => v !== null && v !== undefined);
   return {
     list: list,
+    eps: eps,
+    emoTop: emoTop,
+    bodyTop: bodyTop,
     rate: rates.length
       ? { avg: rates.reduce((a, b) => a + b, 0) / rates.length - 2, n: rates.length }
       : null,
@@ -1402,6 +1554,28 @@ function renderReport(){
       '<p class="rep-note">Пороги PHQ-9: 5 / 10 / 15 / 20. GAD-7: 5 / 10 / 15. ' +
         'Источник — Instruction Manual, phqscreeners.com.</p>' +
 
+      // Ради этого всё и затевалось: врачу нужны не только средние по
+      // шкалам, но и что человек чувствовал и в каком теле.
+      (st.emoTop.length
+        ? '<h3 class="rep-h3">Что чувствовал чаще всего</h3>' +
+          '<table class="rep-t"><thead><tr><th>Эмоция</th><th>Раз</th>' +
+            '<th>Средняя сила</th></tr></thead><tbody>' +
+          st.emoTop.map(e => '<tr><td>' + esc(e.name) + '</td><td>' + e.n +
+            '</td><td>' + fix(e.avg) + ' из 10</td></tr>').join('') +
+          '</tbody></table>'
+        : '') +
+
+      (st.bodyTop.length
+        ? '<h3 class="rep-h3">Телесные симптомы</h3>' +
+          '<table class="rep-t"><thead><tr><th>Что</th><th>Раз</th>' +
+            '<th>Средняя оценка</th></tr></thead><tbody>' +
+          st.bodyTop.map(e => '<tr><td>' + esc(e.name) + '</td><td>' + e.n +
+            '</td><td>' + fix(e.avg) + ' из 10</td></tr>').join('') +
+          '</tbody></table>' +
+          '<p class="rep-note">Телесные симптомы в записях оцениваются от 1 до 10, ' +
+            'шкалы дневника — от 0 до 4. Это разные шкалы, складывать их нельзя.</p>'
+        : '') +
+
       '<h3 class="rep-h3">Побочные эффекты</h3>' +
       '<table class="rep-t"><thead><tr><th>Что</th><th>Дней</th><th>Средняя тяжесть</th></tr></thead>' +
         '<tbody>' + sideRows + '</tbody></table>' +
@@ -1411,10 +1585,55 @@ function renderReport(){
           st.misses.map(human).join(', ') + '</p>'
         : '') +
 
+      (st.eps.length
+        ? '<h3 class="rep-h3">Записи за период</h3>' +
+          '<p class="rep-note">Всего ' + st.eps.length +
+            (st.eps.length > 40 ? '. Показаны последние 40.' : '.') + '</p>' +
+          '<table class="rep-t"><thead><tr><th>Когда</th><th>Что было</th></tr></thead>' +
+          '<tbody>' + st.eps.slice(-40).map(e =>
+            '<tr><td>' + human(e.date) + (e.time ? ', ' + e.time : '') + '</td><td>' +
+            esc(epTitle(e)) +
+            (e.emo.length
+              ? '<br><span class="rep-sub">' +
+                esc(e.emo.map(x => x.n.toLowerCase() + ' ' + x.v).join(', ')) + '</span>'
+              : '') +
+            (e.situation
+              ? '<br><span class="rep-sub">перед этим: ' + esc(e.situation) + '</span>'
+              : '') +
+            (e.unknown
+              ? '<br><span class="rep-sub">своими словами: ' + esc(e.unknown) + '</span>'
+              : '') +
+            '</td></tr>').join('') + '</tbody></table>'
+        : '') +
+
+      (questions().length
+        ? '<div class="print-only">' +
+          '<h3 class="rep-h3">Вопросы врачу</h3>' +
+          '<ul class="rep-q">' + questions().map(q =>
+            '<li' + (q.done ? ' class="done"' : '') + '>' + esc(q.t) + '</li>').join('') +
+          '</ul></div>'
+        : '') +
+
       '<h3 class="rep-h3">Заметки врача</h3>' +
       '<div class="rep-box"></div>' +
       '<p class="rep-note">Данные введены самим пациентом. Это не диагноз и не оценка ' +
         'лечения. Напечатано ' + human(isoToday()) + '.</p>' +
+    '</div>' +
+
+    // Вопросы приходят в голову между приёмами и к приёму забываются.
+    // Список стоит здесь, на экране подготовки к визиту, и уходит в печать
+    // вместе с отчётом.
+    '<div class="no-print">' +
+      '<h3 class="rep-h3">Вопросы врачу</h3>' +
+      '<div class="qlist" id="qList"></div>' +
+      '<div class="fields" style="align-items:flex-end;margin-top:var(--s1)">' +
+        '<label>Новый вопрос<input type="text" id="qNew" autocomplete="off" ' +
+          'placeholder="почему к вечеру хуже?"></label>' +
+        '<button class="btn" type="button" id="qAdd" ' +
+          'style="flex:0 0 108px;margin:0">Добавить</button>' +
+      '</div>' +
+      '<p class="flow-note">Нажать на вопрос — вычеркнуть как заданный, ' +
+        'крестик — убрать совсем. В печать идут все.</p>' +
     '</div>' +
 
     '<button class="btn no-print" type="button" id="repPrint" style="margin-top:var(--s3)">' +
@@ -1425,6 +1644,12 @@ function renderReport(){
 
   document.querySelectorAll('#repSeg button').forEach(b =>
     b.addEventListener('click', () => { reportSpan = Number(b.dataset.s); render(); }));
+  renderQuestions();
+  $('qAdd').addEventListener('click', () => {
+    if (addQuestion($('qNew').value)) { $('qNew').value = ''; renderReport(); }
+  });
+  $('qNew').addEventListener('keydown', e => { if (e.key === 'Enter') $('qAdd').click(); });
+
   $('repPrint').addEventListener('click', () => window.print());
 }
 
@@ -1475,7 +1700,30 @@ function renderScales(){
     '</div>';
   }).join('');
 
-  $('main').innerHTML = cards +
+  // Недельные шкалы живут здесь, рядом с опросниками: это та же
+  // периодическая мера, только своя и короткая. Заполняются прямо в
+  // карточке — отдельный экран ради трёх строк не нужен.
+  const wDue = weeklyDue(), wLast = weeklyLast();
+  const weekly = '<div class="card"><div class="cap">' +
+      '<span class="n">Раз в неделю</span>' +
+      '<span class="v">подъём, чувства, дела</span></div>' +
+    '<p class="flow-note" style="margin:0 0 var(--s1)">' +
+      (wLast ? 'Последний раз ' + human(wLast) + ' · ' +
+               (wDue <= isoToday() ? '<b>пора</b>' : 'следующий раз ' + human(wDue))
+             : 'Ещё не заполняли.') + '</p>' +
+    weeklyScales().map(sc =>
+      '<div class="sc">' +
+        '<div class="sc-h"><span class="n">' + sc.name + '</span>' +
+          '<span class="v" id="w-' + sc.id + '"></span></div>' +
+        '<p class="sc-q">' + sc.hint + '</p>' +
+        '<div class="seg" role="radiogroup" aria-label="' + sc.name +
+          '" data-wk="' + sc.id + '"></div>' +
+      '</div>').join('') +
+    '<p class="flow-note" style="margin:var(--s1) 0 0">Записывается в ' +
+      'сегодняшний день и идёт на тот же график.</p>' +
+    '</div>';
+
+  $('main').innerHTML = cards + weekly +
     // Зачем и как часто — спрашивал владелец. Цифры не выдуманы: рубежи
     // те же, что заложены в расписание, и обоснованы в АНАЛИЗ.md §4.
     '<div class="card"><div class="cap"><span class="n">Зачем и как часто</span></div>' +
@@ -1509,6 +1757,33 @@ function renderScales(){
       'решает врач.</p>' +
     '<p class="credit">' + QCREDIT + '</p>' +
     '<p class="saved" id="saved"></p>';
+
+  // Недельные шкалы пишутся в сегодняшний день: отдельного хранилища им
+  // не нужно, график и отчёт читают их там же, где ежедневные.
+  weeklyScales().forEach(sc => {
+    const seg = document.querySelector('.seg[data-wk="' + sc.id + '"]');
+    if (!seg) return;
+    const cur = today.scales[sc.id];
+    for (let i = 0; i < 5; i++) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', cur === i ? 'true' : 'false');
+      b.setAttribute('aria-label', sc.name + ': ' + sc.words[i]);
+      b.dataset.v = String(i);
+      b.textContent = String(i);
+      b.addEventListener('click', () => {
+        const off = today.scales[sc.id] === i;
+        if (off) delete today.scales[sc.id]; else today.scales[sc.id] = i;
+        seg.querySelectorAll('button').forEach((x, j) =>
+          x.setAttribute('aria-checked', (!off && j === i) ? 'true' : 'false'));
+        $('w-' + sc.id).textContent = off ? '—' : sc.words[i];
+        queueSave();
+      });
+      seg.appendChild(b);
+    }
+    $('w-' + sc.id).textContent = cur === undefined ? '—' : sc.words[cur];
+  });
 
   document.querySelectorAll('[data-start]').forEach(b =>
     b.addEventListener('click', () => {
@@ -1645,9 +1920,12 @@ function nextPlans(){
     .filter(d => d.plan && d.date >= from && d.date <= to)
     .sort((a, b) => a.date < b.date ? -1 : 1)
     .slice(0, 5);
-  if (!list.length) return '';
-  return '<div class="planline"><b>Впереди</b>' +
-    list.map(d => esc(human(d.date)) + ' — ' + esc(d.plan)).join('<br>') + '</div>';
+  const due = quizDue().map(q =>
+    esc(human(q.iso)) + ' — пройти ' + esc(q.name) +
+    (q.iso <= isoToday() ? ' (пора)' : ''));
+  const rows = list.map(d => esc(human(d.date)) + ' — ' + esc(d.plan)).concat(due);
+  if (!rows.length) return '';
+  return '<div class="planline"><b>Впереди</b>' + rows.join('<br>') + '</div>';
 }
 
 /* Сон выставляется выбором, а не кнопками «ещё полчаса». Шаг в полчаса не
@@ -1692,7 +1970,7 @@ let sub = '';                 // открытый раздел дня, '' — т
 // вытаскивать наружу именно её — произвол. Пока ничего не отмечено, сводка
 // говорит, что внутри; как только отмечено — сколько из скольких.
 function sumState(){
-  const vis = visibleScales();
+  const vis = dailyScales();
   const got = vis.filter(sc => today.scales[sc.id] !== undefined);
   if (!got.length) {
     return vis.slice(0, 3).map(s => s.name.toLowerCase()).join(', ') +
@@ -1726,7 +2004,7 @@ function sectionCard(id){
   // «Состояния» в пустом виде перечисляет шкалы и под «не отмечено» уже
   // не подходит.
   const empty = {
-    state: visibleScales().every(sc => today.scales[sc.id] === undefined),
+    state: dailyScales().every(sc => today.scales[sc.id] === undefined),
     sleep: !today.sleepTime && !today.wakeTime &&
            (today.sleepH === null || today.sleepH === undefined) && !today.sleepDay,
     intake: today.intake === null,
@@ -1849,6 +2127,18 @@ function subEpisode(){
       'placeholder="Тогда опишите своими словами: где в теле, на что похоже" ' +
       'hidden></textarea>' +
 
+    '<h3 class="meds-h">Тело</h3>' +
+    '<p class="sc-q">Нажать — выбрать, ещё раз — убрать. У выбранных ' +
+      'появится оценка от 1 до 10.</p>' +
+    '<div class="chips wrap" id="bodyChips"></div>' +
+    '<div id="bodyVals"></div>' +
+    '<div class="fields" style="margin-top:var(--s2);align-items:flex-end">' +
+      '<label>Другое<input type="text" id="bodyNew" autocomplete="off" ' +
+        'placeholder="звон в ушах"></label>' +
+      '<button class="btn" type="button" id="bodyAdd" ' +
+        'style="flex:0 0 108px;margin:0">Добавить</button>' +
+    '</div>' +
+
     '<h3 class="meds-h">Что было перед этим</h3>' +
     '<textarea id="epSit" aria-label="Ситуация" ' +
       'placeholder="Одна-две строки: что случилось до"></textarea>' +
@@ -1874,7 +2164,7 @@ function wireEpisode(){
     }, was || e || {}, {
       time: $('epTime').value, text: ta.value,
       situation: $('epSit').value, unknown: $('epUnknown').value,
-      emo: emo, updated: new Date().toISOString()
+      emo: emo, body: body, updated: new Date().toISOString()
     }));
     if (!rec) return;
     write(EPISODES, rec).then(() => {
@@ -1930,6 +2220,60 @@ function wireEpisode(){
     chips.appendChild(c);
   });
   drawVals();
+
+  // Тело — та же механика, что у эмоций: выбрал, появилась оценка.
+  let body = e ? Object.assign({}, e.body) : {};
+  const bVals = $('bodyVals');
+  const bChips = $('bodyChips');
+
+  const drawBody = () => {
+    const names = Object.keys(body);
+    bVals.innerHTML = names.map(n =>
+      '<div class="emoRow"><span class="n">' + esc(n) + '</span>' +
+      '<input type="range" min="1" max="10" step="1" value="' + body[n] + '" ' +
+        'aria-label="Сила: ' + esc(n) + '" data-body="' + esc(n) + '">' +
+      '<span class="v">' + body[n] + '</span></div>').join('');
+    bVals.querySelectorAll('input[data-body]').forEach(r => {
+      r.addEventListener('input', () => {
+        body[r.dataset.body] = Number(r.value);
+        r.nextElementSibling.textContent = r.value;
+      });
+      r.addEventListener('change', save);
+    });
+  };
+
+  const drawBodyChips = () => {
+    bChips.innerHTML = '';
+    bodyList().forEach(n => {
+      const c = document.createElement('button');
+      c.type = 'button';
+      c.className = 'chip';
+      c.dataset.body = n;
+      c.textContent = n;
+      c.setAttribute('aria-pressed', body[n] ? 'true' : 'false');
+      c.addEventListener('click', () => {
+        if (body[n]) delete body[n]; else body[n] = 5;
+        c.setAttribute('aria-pressed', body[n] ? 'true' : 'false');
+        drawBody();
+        save();
+      });
+      bChips.appendChild(c);
+    });
+  };
+  drawBodyChips();
+  drawBody();
+
+  $('bodyAdd').addEventListener('click', () => {
+    const v = $('bodyNew').value.trim().slice(0, 40);
+    if (!v) return;
+    const list = Array.isArray(meta.bodyExtra) ? meta.bodyExtra.slice() : [];
+    if (bodyList().indexOf(v) < 0) { list.push(v); meta.bodyExtra = list; saveMeta(); }
+    body[v] = 5;
+    $('bodyNew').value = '';
+    drawBodyChips();
+    drawBody();
+    save();
+  });
 
   $('emoUnk').addEventListener('click', () => {
     const t = $('epUnknown');
@@ -2000,17 +2344,20 @@ function renderSub(){
    названию «Подъём» или «Чувства» понять, что именно спрашивают и что
    значит цифра, нельзя. */
 function subState(){
-  return visibleScales().map(sc =>
+  return dailyScales().map(sc =>
     '<div class="sc">' +
       '<div class="sc-h"><span class="n">' + sc.name + '</span>' +
         '<span class="v" id="v-' + sc.id + '"></span></div>' +
       '<p class="sc-q">' + sc.hint + '</p>' +
       '<div class="seg" role="radiogroup" aria-label="' + sc.name + '" data-sc="' + sc.id + '"></div>' +
-    '</div>').join('');
+    '</div>').join('') +
+    '<p class="sc-q" style="margin-top:var(--s3)">Подъём, чувства и дела — ' +
+      'раз в неделю, на вкладке «Шкалы». Каждый день они почти не меняются, ' +
+      'а работы требуют столько же.</p>';
 }
 
 function wireState(){
-  visibleScales().forEach(sc => {
+  dailyScales().forEach(sc => {
     const seg = document.querySelector('.seg[data-sc="' + sc.id + '"]');
     const cur = today.scales[sc.id];
     for (let i = 0; i < 5; i++) {
@@ -2484,6 +2831,13 @@ function renderFlow(){
   const todayIso = isoToday();
   const p = n => String(n).padStart(2, '0');
 
+  // Сроки опросников — отметкой в клетке: владелец справедливо заметил,
+  // что советовать проходить и не показывать когда — половина дела.
+  const dueSet = {};
+  quizDue().forEach(q => {
+    dueSet[q.iso] = (dueSet[q.iso] ? dueSet[q.iso] + ', ' : '') + q.name;
+  });
+
   let cells = '', filled = 0, past = 0;
   for (let i = 0; i < firstCol; i++) cells += '<div></div>';
   for (let d = 1; d <= inMonth; d++) {
@@ -2509,6 +2863,7 @@ function renderFlow(){
       d +
       (rec && rec.note ? '<span class="dot"></span>' : '') +
       (rec && rec.plan ? '<span class="plan"></span>' : '') +
+      (dueSet[iso] ? '<span class="quiz" title="' + dueSet[iso] + '"></span>' : '') +
       (rec && rec.backfill ? '<span class="mark">∗</span>' : '') +
       '</button>';
   }
@@ -2530,6 +2885,9 @@ function renderFlow(){
       '<span><i style="background:var(--side);border-radius:50%;width:8px;height:8px"></i>заметка</span>' +
       '<span><i style="background:var(--accent);border-radius:50%;width:8px;height:8px"></i>план</span>' +
       '<span class="backfill-mark">∗ заполнено позже</span>' +
+      (Object.keys(dueSet).length
+        ? '<span><i style="background:var(--sleep);border-radius:50%;width:8px;height:8px"></i>опросник</span>'
+        : '') +
     '</div>' +
     nextPlans() +
     '<p class="flow-note">Заполнено ' + filled + ' из ' + past + ' прошедших дней месяца. ' +
@@ -2761,7 +3119,8 @@ function snapshot(){
   return { app:'M.H', version:2, exported:new Date().toISOString(),
            meta:{ drug:meta.drug, doseMg:meta.doseMg, startDate:meta.startDate,
                   side:meta.side, pain:meta.pain, crisis:meta.crisis, title:meta.title,
-                  intakeDefault:meta.intakeDefault },
+                  intakeDefault:meta.intakeDefault, bodyExtra:meta.bodyExtra,
+                  questions:meta.questions },
            events: sortedEvents(),
            episodes: episodes.slice().sort((a, b) =>
              (a.date + (a.time || '')) < (b.date + (b.time || '')) ? -1 : 1),
@@ -2895,6 +3254,14 @@ async function applyImport(){
     if (typeof mt.title === 'string' && mt.title)      meta.title = mt.title.slice(0, 24);
     if (typeof mt.pain === 'boolean')                  meta.pain = mt.pain;
     if (typeof mt.intakeDefault === 'boolean')         meta.intakeDefault = mt.intakeDefault;
+    if (Array.isArray(mt.questions))
+      meta.questions = mt.questions
+        .filter(q => q && typeof q.t === 'string' && q.t)
+        .map(q => ({ id: typeof q.id === 'string' && q.id ? q.id : newId(),
+                     t: q.t.slice(0, 300), done: q.done === true }));
+    if (Array.isArray(mt.bodyExtra))
+      meta.bodyExtra = mt.bodyExtra.filter(n => typeof n === 'string' && n)
+                                   .map(n => n.slice(0, 40));
     if (Array.isArray(mt.side)) {
       const clean = mt.side
         .filter(s => s && typeof s.n === 'string' && s.n)
@@ -2928,6 +3295,7 @@ window.__mh = {
   get events(){ return sortedEvents(); },
   get episodes(){ return episodes.slice(); },
   openEp: openEp,
+  keepsDiary: keepsDiary,
   del: del,
   get scores(){ return scores.slice(); },
   get quiz(){ return quiz; },
